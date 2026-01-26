@@ -1,4 +1,5 @@
-#include "sclerp/core/lie.hpp"
+#include "sclerp/core/math/se3.hpp"
+#include "sclerp/core/math/types.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -8,53 +9,35 @@ static inline double clamp(double x, double lo, double hi) {
   return std::max(lo, std::min(hi, x));
 }
 
-Mat3 hat3(const Vec3& w) {
-  Mat3 W;
-  W <<     0.0, -w.z(),  w.y(),
-        w.z(),     0.0, -w.x(),
-       -w.y(),  w.x(),     0.0;
-  return W;
+Mat4 hat6(const Twist& xi) {
+  const Vec3 w = xi.head<3>();
+  const Vec3 v = xi.tail<3>();
+
+  Mat4 X = Mat4::Zero();
+  X.block<3,3>(0,0) = hat3(w);
+  X.block<3,1>(0,3) = v;
+  return X;
 }
 
-Vec3 vee3(const Mat3& W) {
-  return Vec3(W(2,1), W(0,2), W(1,0));
+Twist vee6(const Mat4& Xi) {
+  Twist xi;
+  xi.head<3>() = vee3(Xi.block<3,3>(0,0));
+  xi.tail<3>() = Xi.block<3,1>(0,3);
+  return xi;
 }
 
-Quat expSO3(const Vec3& w) {
+Transform expSE3(const Twist& xi) {
+  const Vec3 w = xi.head<3>();
+  const Vec3 v = xi.tail<3>();
   const double theta = w.norm();
-  if (theta < 1e-12) {
-    // Small angle: q ~ [1, 0.5*w]
-    return Quat(1.0, 0.5*w.x(), 0.5*w.y(), 0.5*w.z()).normalized();
-  }
-  const Vec3 axis = w / theta;
-  return Quat(Eigen::AngleAxisd(theta, axis));
-}
 
-Vec3 logSO3(const Mat3& R) {
-  const double cos_theta = clamp((R.trace() - 1.0) * 0.5, -1.0, 1.0);
-  const double theta = std::acos(cos_theta);
-
-  if (theta < 1e-12) {
-    return Vec3::Zero();
-  }
-
-  // w_hat = (theta/(2*sin(theta))) * (R - R^T)
-  const Mat3 W = (theta / (2.0 * std::sin(theta))) * (R - R.transpose());
-  return vee3(W);
-}
-
-SE3d expSE3(const Twist6d& xi) {
-  const Vec3 w = xi.omega;
-  const Vec3 v = xi.v;
-
-  const double theta = w.norm();
   Mat3 R = Mat3::Identity();
   Mat3 V = Mat3::Identity();
 
   if (theta < 1e-12) {
-    // R ~ I + W, V ~ I + 0.5 W + 1/6 W^2
     const Mat3 W = hat3(w);
     const Mat3 W2 = W * W;
+    // Small-angle series
     R = Mat3::Identity() + W + 0.5 * W2;
     V = Mat3::Identity() + 0.5 * W + (1.0/6.0) * W2;
   } else {
@@ -69,19 +52,22 @@ SE3d expSE3(const Twist6d& xi) {
     V = Mat3::Identity() + B * W + C * W2;
   }
 
-  const Vec3 p = V * v;
-  return SE3d(Quat(R), p);
+  Transform T = Transform::Identity();
+  T.linear() = R;
+  T.translation() = V * v;
+  return T;
 }
 
-Twist6d logSE3(const SE3d& T) {
-  Twist6d xi;
-  const Mat3 R = T.R();
-  const Vec3 p = T.p;
+Twist logSE3(const Transform& T) {
+  const Mat3 R = T.rotation();
+  const Vec3 p = T.translation();
 
+  Twist xi;
   const Vec3 w = logSO3(R);
   const double theta = w.norm();
 
   Mat3 V = Mat3::Identity();
+
   if (theta < 1e-12) {
     const Mat3 W = hat3(w);
     const Mat3 W2 = W * W;
@@ -94,9 +80,24 @@ Twist6d logSE3(const SE3d& T) {
     V = Mat3::Identity() + B * W + C * W2;
   }
 
-  xi.omega = w;
-  xi.v = V.inverse() * p;
+  xi.head<3>() = w;
+  xi.tail<3>() = V.inverse() * p;
   return xi;
 }
 
+Transform invSE3(const Transform& T) {
+  return T.inverse();
+}
+
+Mat4 getTransformationInv(const Mat4& g) {
+  const Mat3 R = g.block<3,3>(0,0);
+  const Vec3 p = g.block<3,1>(0,3);
+
+  Mat4 out = Mat4::Identity();
+  out.block<3,3>(0,0) = R.transpose();
+  out.block<3,1>(0,3) = -R.transpose() * p;
+  return out;
+}
+
 }  // namespace sclerp::core
+

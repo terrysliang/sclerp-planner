@@ -3,9 +3,12 @@ include(CMakePackageConfigHelpers)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
 add_library(sclerp_core
-  src/lie.cpp
-  src/planner.cpp
-  src/interpolate.cpp
+  src/types.cpp
+  src/so3.cpp
+  src/se3.cpp
+  src/adjoint.cpp
+  src/distance.cpp
+  src/svd.cpp
 )
 add_library(sclerp::core ALIAS sclerp_core)
 
@@ -17,6 +20,7 @@ target_include_directories(sclerp_core
 
 target_link_libraries(sclerp_core PUBLIC Eigen3::Eigen)
 target_compile_features(sclerp_core PUBLIC cxx_std_17)
+target_compile_definitions(sclerp_core PRIVATE SCLERP_CORE_BUILDING)
 
 sclerp_target_warnings(sclerp_core)
 
