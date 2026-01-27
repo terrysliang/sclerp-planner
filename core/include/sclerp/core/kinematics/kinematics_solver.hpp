@@ -1,4 +1,5 @@
 #pragma once
+#include "sclerp/core/export.hpp"  
 #include "sclerp/core/common/status.hpp"
 #include "sclerp/core/common/constants.hpp"
 #include "sclerp/core/math/types.hpp"

@@ -11,6 +11,9 @@ option(SCLERP_BUILD_TESTS "Build tests" OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(SclerpCommon)
 
+include(CTest)
+enable_testing()
+
 if(SCLERP_BUILD_CORE)
   add_subdirectory(core)
 endif()

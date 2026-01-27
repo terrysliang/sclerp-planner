@@ -9,6 +9,11 @@ add_library(sclerp_core
   src/adjoint.cpp
   src/distance.cpp
   src/svd.cpp
+  src/dual_quat.cpp
+  src/screw.cpp
+  src/manipulator_model.cpp
+  src/kinematics_solver.cpp
+  src/motion_plan.cpp
 )
 add_library(sclerp::core ALIAS sclerp_core)
 
@@ -58,3 +63,18 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/sclerp_coreConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/sclerp_core
 )
+
+# ---- tests ----
+include(CTest)
+
+if(BUILD_TESTING)
+  enable_testing()
+
+  add_executable(sclerp_core_smoke_test
+    tests/smoke_test.cpp
+  )
+  target_link_libraries(sclerp_core_smoke_test PRIVATE sclerp_core)
+  target_compile_features(sclerp_core_smoke_test PRIVATE cxx_std_17)
+
+  add_test(NAME sclerp_core_smoke_test COMMAND sclerp_core_smoke_test)
+endif()
