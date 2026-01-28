@@ -90,20 +90,20 @@ Quat slerp(const Quat& q0, const Quat& q1, double t) {
 }
 
 double rotationDistance(const Mat3& R1, const Mat3& R2) {
-  const Mat3 R = R1.transpose() * R2;
-  const double cos_theta = clamp((R.trace() - 1.0) * 0.5, -1.0, 1.0);
-  return std::acos(cos_theta);
+  const Quat q1 = quatFromSO3(R1);
+  const Quat q2 = quatFromSO3(R2);
+  return rotationDistance(q1, q2);
 }
 
 double rotationDistance(const Quat& q1, const Quat& q2) {
-  Quat a = q1.normalized();
-  Quat b = q2.normalized();
-  // relative rotation
-  Quat dq = a.conjugate() * b;
-  dq.normalize();
-  const double w = clamp(std::abs(dq.w()), 0.0, 1.0);
-  return 2.0 * std::acos(w);
+  const Quat a = q1.normalized();
+  const Quat b = q2.normalized();
+
+  const Eigen::Vector4d v1 = a.coeffs();
+  const Eigen::Vector4d v2 = b.coeffs();
+  const double d1 = (v1 - v2).norm();
+  const double d2 = (v1 + v2).norm();
+  return (d1 > d2) ? d2 : d1;
 }
 
 }  // namespace sclerp::core
-

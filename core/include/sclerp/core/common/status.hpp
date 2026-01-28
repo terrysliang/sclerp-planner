@@ -3,7 +3,6 @@
 
 namespace sclerp::core {
 
-// Refactored replacement for kinlib::ErrorCodes
 enum class Status : std::uint8_t {
   Success = 0,
   Failure = 1,

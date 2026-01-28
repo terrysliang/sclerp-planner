@@ -35,7 +35,7 @@ struct JointSpec {
   Vec3 point = Vec3::Zero();
 
   JointLimit limit{};
-  Transform joint_tip_home = Transform::Identity();  // kinlib joint_tip_pose_ analogue
+  Transform joint_tip_home = Transform::Identity();
 };
 
 class ManipulatorModel {

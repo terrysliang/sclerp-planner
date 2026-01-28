@@ -22,9 +22,4 @@ double rotationDistance(const Transform& T1, const Transform& T2) {
   return rotationDistance(R1, R2); 
 }
 
-double rotationDistance(const Mat4& t1, const Mat4& t2) {
-  return rotationDistance(transformFromMatrix4(t1), transformFromMatrix4(t2));
-}
-
 }  // namespace sclerp::core
-

@@ -1,10 +1,9 @@
 #include "sclerp/core/kinematics/kinematics_solver.hpp"
 
-#include "sclerp/core/math/adjoint.hpp"
-#include "sclerp/core/math/se3.hpp"
-#include "sclerp/core/math/svd.hpp"
+#include "sclerp/core/math/so3.hpp"
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 #include <stdexcept>
 
 namespace sclerp::core {
@@ -12,18 +11,44 @@ namespace sclerp::core {
 KinematicsSolver::KinematicsSolver(ManipulatorModel model)
   : model_(std::move(model)) {}
 
+static Transform jointExp(const JointSpec& j, double q) {
+  Transform T = Transform::Identity();
+
+  if (j.type == JointType::Revolute) {
+    const Vec3 w = j.axis;
+    const Mat3 R = Eigen::AngleAxisd(q, w).toRotationMatrix();
+    const Vec3 p = (Mat3::Identity() - R) * j.point;
+    T.linear() = R;
+    T.translation() = p;
+  } else if (j.type == JointType::Prismatic) {
+    T.translation() = j.axis * q;
+  } else {
+    // Fixed: identity
+  }
+
+  return T;
+}
+
+static AdjointMatrix adjointVW(const Transform& T) {
+  const Mat3 R = T.rotation();
+  const Vec3 p = T.translation();
+
+  AdjointMatrix Ad = AdjointMatrix::Zero();
+  Ad.block<3,3>(0,0) = R;
+  Ad.block<3,3>(3,3) = R;
+  Ad.block<3,3>(0,3) = hat3(p) * R;  // ordering: [v; w]
+  return Ad;
+}
+
 Status KinematicsSolver::forwardKinematics(const Eigen::VectorXd& q,
                                            Transform* g_base_tool) const {
   if (!g_base_tool) return Status::InvalidParameter;
   if (q.size() != model_.dof()) return Status::InvalidParameter;
 
   const int n = model_.dof();
-  const ScrewMatrix& S = model_.S_space();
-
   Transform prod = Transform::Identity();
   for (int i = 0; i < n; ++i) {
-    const Twist xi = S.col(i) * q(i);
-    prod = prod * expSE3(xi);
+    prod = prod * jointExp(model_.joint(i), q(i));
   }
 
   *g_base_tool = prod * model_.ee_home();
@@ -39,14 +64,10 @@ Status KinematicsSolver::forwardKinematicsAll(const Eigen::VectorXd& q,
   intermediate_transforms->reserve(static_cast<std::size_t>(model_.dof()) + 1);
 
   const int n = model_.dof();
-  const ScrewMatrix& S = model_.S_space();
-
   Transform prod = Transform::Identity();
   for (int i = 0; i < n; ++i) {
-    const Twist xi = S.col(i) * q(i);
-    prod = prod * expSE3(xi);
+    prod = prod * jointExp(model_.joint(i), q(i));
 
-    // Mimic kinlib “joint tip” idea:
     // each JointSpec has joint_tip_home (fixed home transform for that joint's tip frame)
     // so g_i(q) = (Π exp(Sk qk)) * M_i
     const Transform g_tip = prod * model_.joint(i).joint_tip_home;
@@ -64,65 +85,97 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
   if (q.size() != model_.dof()) return Status::InvalidParameter;
 
   const int n = model_.dof();
-  const ScrewMatrix& S = model_.S_space();
-
   J_space->resize(6, n);
 
-  Transform prod = Transform::Identity();  // Π_{k<i} exp(Sk qk)
+  Eigen::MatrixXd joint_twists = Eigen::MatrixXd::Zero(6, n);
   for (int i = 0; i < n; ++i) {
-    if (i == 0) {
-      J_space->col(i) = S.col(i);
+    const auto& j = model_.joint(i);
+    if (j.type == JointType::Revolute) {
+      const Vec3 w = j.axis;
+      const Vec3 v = -w.cross(j.point);
+      joint_twists.block<3,1>(0, i) = v;
+      joint_twists.block<3,1>(3, i) = w;
+    } else if (j.type == JointType::Prismatic) {
+      joint_twists.block<3,1>(0, i) = j.axis;
     } else {
-      const AdjointMatrix Ad = adjoint(prod);
-      J_space->col(i) = Ad * S.col(i);
+      // Fixed: zero
     }
-
-    // update prod for next column
-    const Twist xi = S.col(i) * q(i);
-    prod = prod * expSE3(xi);
   }
 
-  return Status::Success;
-}
+  if (n > 0) {
+    J_space->col(0) = joint_twists.col(0);
+  }
 
-Status KinematicsSolver::rmrcIncrement(const Transform& g_current,
-                                       const Transform& g_goal,
-                                       const Eigen::VectorXd& q_current,
-                                       Eigen::VectorXd* dq,
-                                       const RmrcOptions& opt) const {
-  if (!dq) return Status::InvalidParameter;
-  if (q_current.size() != model_.dof()) return Status::InvalidParameter;
+  Transform prod = Transform::Identity();  // Π_{k<i} exp(joint_k)
+  for (int i = 1; i < n; ++i) {
+    prod = prod * jointExp(model_.joint(i - 1), q(i - 1));
+    const AdjointMatrix Ad = adjointVW(prod);
+    J_space->col(i) = Ad * joint_twists.col(i);
+  }
 
-  Eigen::MatrixXd J;
-  const Status stJ = spatialJacobian(q_current, &J);
-  if (!ok(stJ)) return stJ;
-
-  // Error twist: g_rel = g_current^{-1} g_goal
-  // logSE3(g_rel) gives a twist in the CURRENT/body frame.
-  // Convert to spatial frame via Ad_g_current.
-  const Transform g_rel = g_current.inverse() * g_goal;
-  Twist xi_body = logSE3(g_rel);
-  Twist xi_space = adjoint(g_current) * xi_body;
-
-  // Apply gains (rot on omega, pos on v)
-  xi_space.head<3>() *= opt.rot_gain;
-  xi_space.tail<3>() *= opt.pos_gain;
-
-  // Pseudoinverse solve
-  const Eigen::MatrixXd J_pinv = svdPseudoInverse(J, opt.jac.svd_tol);
-  Eigen::VectorXd step = J_pinv * xi_space;
-
-  // Integrate step size (RMRC discrete step)
-  *dq = step * opt.step;
   return Status::Success;
 }
 
 Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
                                        const DualQuat& dq_f,
                                        const Eigen::VectorXd& q_current,
-                                       Eigen::VectorXd* dq,
-                                       const RmrcOptions& opt) const {
-  return rmrcIncrement(dq_i.toTransform(), dq_f.toTransform(), q_current, dq, opt);
+                                       Eigen::VectorXd* dq) const {
+  if (!dq) return Status::InvalidParameter;
+  if (q_current.size() != model_.dof()) return Status::InvalidParameter;
+
+  // RMRC in dual-quat form.
+  const Transform g_i = dq_i.toTransform();
+  const Transform g_f = dq_f.toTransform();
+
+  Eigen::Matrix<double, 7, 1> gamma_i;
+  Eigen::Matrix<double, 7, 1> gamma_f;
+
+  const Vec3 p_i = g_i.translation();
+  gamma_i.head<3>() = p_i;
+  const Quat q_i = dq_i.real();
+  gamma_i(3) = q_i.w();
+  gamma_i(4) = q_i.x();
+  gamma_i(5) = q_i.y();
+  gamma_i(6) = q_i.z();
+
+  const Vec3 p_f = g_f.translation();
+  gamma_f.head<3>() = p_f;
+  const Quat q_f = dq_f.real();
+  gamma_f(3) = q_f.w();
+  gamma_f(4) = q_f.x();
+  gamma_f(5) = q_f.y();
+  gamma_f(6) = q_f.z();
+
+  Eigen::MatrixXd s_jac;
+  const Status st = spatialJacobian(q_current, &s_jac);
+  if (!ok(st)) return st;
+
+  Eigen::Vector4d qv;
+  qv << q_i.w(), q_i.x(), q_i.y(), q_i.z();
+
+  Eigen::Matrix<double, 3, 4> J1 = Eigen::Matrix<double, 3, 4>::Zero();
+  J1.block<3,1>(0,0) = -qv.tail<3>();
+  J1(0,1) =  qv(0);
+  J1(0,2) = -qv(3);
+  J1(0,3) =  qv(2);
+  J1(1,1) =  qv(3);
+  J1(1,2) =  qv(0);
+  J1(1,3) = -qv(1);
+  J1(2,1) = -qv(2);
+  J1(2,2) =  qv(1);
+  J1(2,3) =  qv(0);
+
+  Eigen::Matrix<double, 6, 7> J2 = Eigen::Matrix<double, 6, 7>::Zero();
+  J2.block<3,3>(0,0) = Mat3::Identity();
+  J2.block<3,4>(0,3) = 2.0 * hat3(p_i) * J1;
+  J2.block<3,4>(3,3) = 2.0 * J1;
+
+  Eigen::MatrixXd temp = s_jac * s_jac.transpose();
+  Eigen::MatrixXd jac_pinv = s_jac.transpose() * temp.inverse();
+  Eigen::MatrixXd B = jac_pinv * J2;
+
+  *dq = B * (gamma_f - gamma_i);
+  return Status::Success;
 }
 
 }  // namespace sclerp::core

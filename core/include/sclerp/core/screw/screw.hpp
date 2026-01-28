@@ -22,13 +22,12 @@ struct ScrewParameters {
   Vec3 omega = Vec3::Zero();   // unit axis if applicable
   double theta = 0.0;          // rotation magnitude (rad)
   double pitch = 0.0;          // h (m/rad), 0 for pure rotation
-  Vec3 l = Vec3::Zero();       // direction vector used by kinlib (keep for parity)
+  Vec3 l = Vec3::Zero();       // direction vector
 
   // relative motion (optional convenience)
   Transform g_rel = Transform::Identity();
 };
 
-// Equivalent capability to kinlib::getScrewParameters, but returns a struct.
 Status screwParameters(const Transform& g_i,
                        const Transform& g_f,
                        ScrewParameters* out,
@@ -38,7 +37,7 @@ Status screwParameters(const Transform& g_i,
 Transform sclerp(const Transform& g_i, const Transform& g_f, double t);
 
 // Nearest pose on the constant screw from g_i to g_f to a target pose g_t.
-// Returns tau in [0,1] (same meaning as kinlib 't') and the distances.
+// Returns tau in [0,1] and the distances.
 struct NearestOnScrewResult {
   Status status{Status::Failure};
   double tau01{0.0};
@@ -52,13 +51,13 @@ NearestOnScrewResult nearestPoseOnScrew(const Transform& g_i,
                                         const Transform& g_t,
                                         const Thresholds& thr = kDefaultThresholds);
 
-// Important: kinlib::getScrewSegments segments a POSE SEQUENCE and returns END INDICES.
+// Important: segments a POSE SEQUENCE and returns END INDICES.
 Status screwSegments(const std::vector<Transform>& g_seq,
                      std::vector<unsigned int>* seg_end_indices,
                      double max_pos_d = 0.015,
                      double max_rot_d = 0.15);
 
-// Convenience overload to accept Matrix4d like kinlib
+// Convenience overload to accept Matrix4d
 Status screwSegments(const std::vector<Mat4>& g_seq,
                      std::vector<unsigned int>* seg_end_indices,
                      double max_pos_d = 0.015,

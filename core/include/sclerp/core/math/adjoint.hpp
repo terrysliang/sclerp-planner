@@ -5,6 +5,6 @@ namespace sclerp::core {
 
 // Adjoint of SE(3)
 AdjointMatrix adjoint(const Transform& T);
-Eigen::Matrix<double, 6, 6> getAdjoint(const Mat4& g);  // kinlib-like utility
+Eigen::Matrix<double, 6, 6> getAdjoint(const Mat4& g);
 
 }  // namespace sclerp::core

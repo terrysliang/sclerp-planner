@@ -14,6 +14,6 @@ Twist logSE3(const Transform& T);
 Transform invSE3(const Transform& T);
 
 // utilities
-Mat4 getTransformationInv(const Mat4& g);  // kinlib-like utility
+Mat4 getTransformationInv(const Mat4& g);
 
 }  // namespace sclerp::core

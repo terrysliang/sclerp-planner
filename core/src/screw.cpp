@@ -84,7 +84,6 @@ Status screwParameters(const Transform& g_i,
   out->theta = th;
   out->pitch = pitch;
 
-  // l is kinlib’s "direction-like" vector; keep something meaningful:
   // use the linear part per rad: v/theta = -omega×q + pitch*omega
   out->l = v_se3 / th;
 

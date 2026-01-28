@@ -80,11 +80,14 @@ static void test_fk_and_jacobian() {
     assert(ok(solver.forwardKinematics(qn, &gn)));
 
     Transform Trel = gn * g.inverse();
-    auto xi = sclerp::core::logSE3(Trel) / eps;
+    const auto xi = sclerp::core::logSE3(Trel) / eps;
+    Eigen::Matrix<double, 6, 1> xi_vk;
+    xi_vk.head<3>() = xi.tail<3>();
+    xi_vk.tail<3>() = xi.head<3>();
 
     // Compare twist
     const Eigen::VectorXd Ji = J.col(i);
-    const double err = (xi - Ji).norm();
+    const double err = (xi_vk - Ji).norm();
     assert(err < 1e-4); // loose but robust
   }
 }
@@ -123,14 +126,14 @@ static void test_motion_plan() {
   req.g_f = g_f;
 
   sclerp::core::MotionPlanOptions opt;
-  opt.num_waypoints = 25;
   opt.max_iters = 4000;
   opt.pos_tol = 1e-4;
   opt.rot_tol = 1e-3;
-  opt.rmrc.step = 0.1;
-  opt.rmrc.pos_gain = 1.0;
-  opt.rmrc.rot_gain = 1.0;
-  opt.rmrc.jac.svd_tol = 1e-6;
+  opt.beta = 0.5;
+  opt.tau = 0.001;
+  opt.tau_i = 0.01;
+  opt.tau_max = 0.1;
+  opt.tau_break = 0.9;
 
   auto res = sclerp::core::planMotionSclerp(solver, req, opt);
   assert(res.status == Status::Success);

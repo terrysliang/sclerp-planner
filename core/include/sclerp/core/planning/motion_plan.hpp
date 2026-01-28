@@ -7,20 +7,25 @@
 
 namespace sclerp::core {
 
-// Refactored version of kinlib::getMotionPlan (no collision, no ROS msgs)
 struct MotionPlanOptions {
-  int max_iters = 2000;
-  int num_waypoints = 100;
+  int max_iters = 10000;
+  double q_init_tol = 0.0;
 
-  double pos_tol = 1e-4;
-  double rot_tol = 1e-3;
+  // stop thresholds
+  double pos_tol = 5e-4;
+  double rot_tol = 5e-3;  // chordal distance (quat)
 
-  // kinlib-like: if violating limits, shrink and retry
-  int max_retries = 10;
-  double shrink = 0.5;
+  // motion schedule parameters
+  double beta = 0.5;
+  double tau = 0.001;
+  double tau_i = 0.01;
+  double tau_max = 0.1;
+  double tau_break = 0.9;
+
+  // If joint deltas shrink below this, treat as joint-limit failure
+  double joint_delta_min = 1e-4;
 
   Thresholds thr = kDefaultThresholds;
-  RmrcOptions rmrc{};
 };
 
 struct MotionPlanRequest {
