@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace sclerp::core {
 
@@ -60,6 +61,8 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
     const double dp = positionDistance(g_cur, req.g_i);
     const double dr = rotationDistance(g_cur, req.g_i);
     if (dp > 1e-3 || dr > 1e-2) {
+      std::cerr << "[sclerp] Warning: g_i differs from FK(q_init) "
+                << "(dp=" << dp << ", dr=" << dr << "); using FK(q_init).\n";
       g_start = g_cur;
     }
   }

@@ -101,6 +101,7 @@ public:
   ManipulatorBuilder& add_fixed(std::string name,
                                 Transform joint_tip_home = Transform::Identity());
 
+  // Warning: thr is only used for validation; screw-axis normalization uses defaults from kDefaultThresholds.
   ManipulatorModel build(const Thresholds& thr = kDefaultThresholds) const;
 
 private:

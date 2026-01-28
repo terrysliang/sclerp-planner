@@ -67,7 +67,7 @@ install(FILES
 # ---- tests ----
 include(CTest)
 
-if(BUILD_TESTING)
+if(SCLERP_BUILD_CORE_TESTS AND BUILD_TESTING)
   enable_testing()
 
   add_executable(sclerp_core_smoke_test
