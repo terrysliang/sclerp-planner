@@ -24,6 +24,38 @@ static inline Quat quatMul(const Quat& a, const Quat& b) {
   return a * b;
 }
 
+static inline Eigen::Vector4d quatVec(const Quat& q) {
+  return Eigen::Vector4d(q.w(), q.x(), q.y(), q.z());
+}
+
+static inline Quat quatFromVec(const Eigen::Vector4d& v) {
+  return Quat(v(0), v(1), v(2), v(3));
+}
+
+static inline Eigen::Vector4d quatProduct(const Eigen::Vector4d& q1,
+                                          const Eigen::Vector4d& q2) {
+  Eigen::Vector4d out;
+  out(0) = (q1(0) * q2(0)) - q1.tail<3>().dot(q2.tail<3>());
+  out.tail<3>() = (q1(0) * q2.tail<3>()) + (q2(0) * q1.tail<3>()) +
+                  q1.tail<3>().cross(q2.tail<3>());
+  return out;
+}
+
+DualQuat DualQuat::productRaw(const DualQuat& a, const DualQuat& b) {
+  const Eigen::Vector4d r1 = quatVec(a.real());
+  const Eigen::Vector4d d1 = quatVec(a.dual());
+  const Eigen::Vector4d r2 = quatVec(b.real());
+  const Eigen::Vector4d d2 = quatVec(b.dual());
+
+  const Eigen::Vector4d r = quatProduct(r1, r2);
+  const Eigen::Vector4d d = quatProduct(d1, r2) + quatProduct(r1, d2);
+
+  DualQuat out;
+  out.qr_ = quatFromVec(r);
+  out.qd_ = quatFromVec(d);
+  return out;
+}
+
 static inline Quat quatConj(const Quat& q) {
   return q.conjugate();
 }
@@ -121,21 +153,77 @@ DualQuat DualQuat::operator*(const DualQuat& rhs) const {
 }
 
 DualQuat DualQuat::pow(double t) const {
-  // Define power via SE(3) log/exp: T^t = exp(t * log(T))
+  // Kinlib-style dual-quat power (raiseToPower).
+  Eigen::Vector4d real_part = quatVec(qr_);
+  Eigen::Vector4d dual_part = quatVec(qd_);
+
+  double theta;
+  if (real_part(0) <= -1.0) {
+    theta = M_PI;
+  } else if (real_part(0) >= 1.0) {
+    theta = 0.0;
+  } else {
+    theta = 2.0 * std::acos(real_part(0));
+  }
+
+  theta = std::fmod(theta + M_PI, 2.0 * M_PI);
+  if (theta < 0.0) {
+    theta += 2.0 * M_PI;
+  }
+  theta -= M_PI;
+
   const Transform T = this->toTransform();
-  const Twist xi = logSE3(T);
-  const Transform Tt = expSE3(xi * t);
-  return DualQuat(Tt);
+  const Vec3 p = T.translation();
+
+  Eigen::Vector4d res_real_part;
+  Eigen::Vector4d res_dual_part;
+
+  if (std::abs(theta) < 1e-6) {
+    Eigen::Vector3d v = dual_part.tail<3>();
+    const double d = 2.0 * v.norm();
+
+    if (d < 1e-12) {
+      res_real_part << 1.0, 0.0, 0.0, 0.0;
+      res_dual_part << 0.0, 0.0, 0.0, 0.0;
+    } else {
+      v = v / (d / 2.0);
+
+      res_real_part(0) = std::cos(t * (theta / 2.0));
+      res_real_part.tail<3>() = v * std::sin(t * (theta / 2.0));
+
+      res_dual_part(0) = -(t * d / 2.0) * std::sin(t * (theta / 2.0));
+      res_dual_part.tail<3>() =
+          (t * d / 2.0) * std::cos(t * (theta / 2.0)) * v;
+    }
+  } else {
+    Eigen::Vector3d rp = real_part.tail<3>();
+    Eigen::Vector3d u = rp / rp.norm();
+
+    const double d = p.dot(u);
+    const Eigen::Vector3d m =
+        (p.cross(u) + ((p - (d * u)) / std::tan(theta / 2.0))) / 2.0;
+
+    res_real_part(0) = std::cos(t * (theta / 2.0));
+    res_real_part.tail<3>() = std::sin(t * (theta / 2.0)) * u;
+
+    res_dual_part(0) = -(t * d / 2.0) * std::sin(t * (theta / 2.0));
+    res_dual_part.tail<3>() =
+        (std::sin(t * (theta / 2.0)) * m) +
+        (((t * d * std::cos(t * theta / 2.0)) / 2.0) * u);
+  }
+
+  DualQuat out;
+  out.qr_ = quatFromVec(res_real_part);
+  out.qd_ = quatFromVec(res_dual_part);
+  return out;
 }
 
 DualQuat DualQuat::interpolate(const DualQuat& a, const DualQuat& b, double t) {
-  // Robust: interpolate in SE(3) using exp/log (ScLERP in SE3)
-  const Transform Ta = a.toTransform();
-  const Transform Tb = b.toTransform();
-  const Transform Trel = Ta.inverse() * Tb;
-  const Twist xi = logSE3(Trel);
-  const Transform Tstep = expSE3(xi * t);
-  return DualQuat(Ta * Tstep);
+  // Kinlib-style interpolation: dq_i * (dq_i*^{-1} dq_f)^t
+  const DualQuat dq_i_conj = a.conjugate();
+  DualQuat dq_rel = DualQuat::productRaw(dq_i_conj, b);
+  dq_rel = dq_rel.pow(t);
+  return DualQuat::productRaw(a, dq_rel);
 }
 
 double rotationDistance(const DualQuat& a, const DualQuat& b) {

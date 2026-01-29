@@ -7,7 +7,7 @@
 #include <Eigen/Geometry>
 
 
-#include <urdf_model/model.h>
+#include <urdf_mod  el/model.h>
 #include <urdf_parser/urdf_parser.h>
 
 namespace sclerp::urdf {

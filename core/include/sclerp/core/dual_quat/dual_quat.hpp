@@ -34,6 +34,8 @@ public:
   static DualQuat interpolate(const DualQuat& a, const DualQuat& b, double t);
 
 private:
+  static DualQuat productRaw(const DualQuat& a, const DualQuat& b);
+
   // dq = qr + eps * qd
   Quat qr_{Quat::Identity()};
   Quat qd_{Quat(0.0, 0.0, 0.0, 0.0)};

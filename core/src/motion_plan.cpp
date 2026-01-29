@@ -193,6 +193,10 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   if ((pos_dist < opt.pos_tol) && (rot_dist < opt.rot_tol)) {
     out.status = Status::Success;
   } else {
+    std::cerr << "[sclerp] planMotionSclerp reached max iters or stalled. "
+              << "pos_dist=" << pos_dist << " (tol=" << opt.pos_tol << "), "
+              << "rot_dist=" << rot_dist << " (tol=" << opt.rot_tol << "), "
+              << "tau=" << tau << ", iters=" << iters << "\n";
     out.status = Status::Failure;
   }
   return out;

@@ -38,23 +38,27 @@ Status screwParameters(const Transform& g_i,
   const Vec3 w = logSO3(R);
   const double theta = w.norm();
 
-  // No motion?
-  if (theta < thr.pure_translation_rot_angle && p.norm() < thr.no_motion_magnitude) {
-    out->type = ScrewMotionType::NoMotion;
-    out->omega.setZero();
-    out->theta = 0.0;
+  // Pure translation / no motion handling (match kinlib behavior).
+  if (theta < thr.pure_translation_rot_angle) {
+    const double p_norm = p.norm();
+    if (p_norm < thr.no_motion_magnitude) {
+      out->type = ScrewMotionType::NoMotion;
+      out->omega.setZero();
+      out->theta = 0.0;
+      out->pitch = 0.0;
+      out->l.setZero();
+      return Status::Success;
+    }
+
+    out->type = ScrewMotionType::PureTranslation;
+    if (p_norm > thr.axis_norm_eps) {
+      out->omega = p / p_norm;
+    } else {
+      out->omega.setZero();
+    }
+    out->theta = p_norm;
     out->pitch = 0.0;
     out->l.setZero();
-    return Status::Success;
-  }
-
-  // Pure translation?
-  if (theta < thr.pure_translation_rot_angle) {
-    out->type = ScrewMotionType::PureTranslation;
-    out->omega.setZero();
-    out->theta = 0.0;
-    out->pitch = 0.0;
-    out->l = (p.norm() > thr.axis_norm_eps) ? (p.normalized()) : Vec3::Zero();
     return Status::Success;
   }
 
