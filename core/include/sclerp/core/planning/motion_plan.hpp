@@ -3,7 +3,7 @@
 #include "sclerp/core/common/constants.hpp"
 #include "sclerp/core/math/types.hpp"
 #include "sclerp/core/kinematics/kinematics_solver.hpp"
-#include "sclerp/core/trajectory/joint_trajectory.hpp"
+#include "sclerp/core/path/joint_path.hpp"
 
 namespace sclerp::core {
 
@@ -36,7 +36,7 @@ struct MotionPlanRequest {
 
 struct MotionPlanResult {
   Status status{Status::Failure};
-  JointTrajectory trajectory;
+  JointPath path;
   int iters{0};
 };
 

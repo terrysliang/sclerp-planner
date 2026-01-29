@@ -1,23 +1,28 @@
 #include "sclerp/core/dual_quat/dual_quat.hpp"
 
+#include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/se3.hpp"
 #include "sclerp/core/math/so3.hpp"
 #include "sclerp/core/math/types.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <stdexcept>
 
 namespace sclerp::core {
 
-static inline Quat quatNormalizeSafe(const Quat& q) {
-  Quat out = q;
-  const double n = out.norm();
+static inline bool quatNormalizeSafe(const Quat& q, Quat* out) {
+  if (!out) return false;
+  const double n = q.norm();
   if (n < 1e-15) {
-    throw std::runtime_error("DualQuat: zero-norm quaternion");
+    return false;
   }
-  out.coeffs() /= n;
-  return out;
+  *out = q;
+  out->coeffs() /= n;
+  return true;
+}
+
+static inline bool nearUnit(double n, double tol = 1e-12) {
+  return std::abs(n - 1.0) <= tol;
 }
 
 static inline Quat quatMul(const Quat& a, const Quat& b) {
@@ -67,8 +72,14 @@ static inline Quat quatFromTranslation(const Vec3& t) {
 DualQuat::DualQuat() = default;
 
 DualQuat::DualQuat(const Transform& T) {
-  qr_ = quatFromSO3(T.rotation());
-  qr_ = quatNormalizeSafe(qr_);
+  Quat qr;
+  if (!quatNormalizeSafe(quatFromSO3(T.rotation()), &qr)) {
+    log(LogLevel::Error, "DualQuat: zero-norm quaternion in constructor");
+    qr_ = Quat::Identity();
+    qd_ = Quat(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+  qr_ = qr;
 
   const Vec3 t = T.translation();
   // qd = 0.5 * (t_quat * qr)
@@ -83,13 +94,20 @@ DualQuat DualQuat::identity() { return DualQuat(); }
 
 DualQuat DualQuat::normalized() const {
   // For rigid transforms, normalize qr to unit and scale qd accordingly.
-  DualQuat out = *this;
-  const double n = out.qr_.norm();
+  const double n = qr_.norm();
   if (n < 1e-15) {
-    throw std::runtime_error("DualQuat::normalized: zero-norm real part");
+    log(LogLevel::Error, "DualQuat::normalized: zero-norm real part");
+    return DualQuat();
   }
-  out.qr_.coeffs() /= n;
-  out.qd_.coeffs() /= n;
+  if (nearUnit(n) && qr_.w() >= 0.0) {
+    return *this;
+  }
+
+  DualQuat out = *this;
+  if (!nearUnit(n)) {
+    out.qr_.coeffs() /= n;
+    out.qd_.coeffs() /= n;
+  }
 
   // fix sign for canonicalization (optional but helps consistency)
   if (out.qr_.w() < 0.0) {
@@ -107,9 +125,21 @@ DualQuat DualQuat::conjugate() const {
 }
 
 Transform DualQuat::toTransform() const {
-  const DualQuat dq = this->normalized();
-  const Quat qr = dq.qr_;
-  const Quat qd = dq.qd_;
+  Quat qr = qr_;
+  Quat qd = qd_;
+  const double n = qr.norm();
+  if (n < 1e-15) {
+    log(LogLevel::Error, "DualQuat::toTransform: zero-norm real part");
+    return Transform::Identity();
+  }
+  if (!nearUnit(n)) {
+    qr.coeffs() /= n;
+    qd.coeffs() /= n;
+  }
+  if (qr.w() < 0.0) {
+    qr.coeffs() *= -1.0;
+    qd.coeffs() *= -1.0;
+  }
 
   const Quat qr_conj = quatConj(qr);
   // t_quat = 2 * (qd * qr*)
@@ -130,7 +160,19 @@ Mat4 DualQuat::toMatrix4() const {
 }
 
 Quat DualQuat::rotation() const {
-  return this->normalized().qr_;
+  Quat qr = qr_;
+  const double n = qr.norm();
+  if (n < 1e-15) {
+    log(LogLevel::Error, "DualQuat::rotation: zero-norm real part");
+    return Quat::Identity();
+  }
+  if (!nearUnit(n)) {
+    qr.coeffs() /= n;
+  }
+  if (qr.w() < 0.0) {
+    qr.coeffs() *= -1.0;
+  }
+  return qr;
 }
 
 Vec3 DualQuat::translation() const {

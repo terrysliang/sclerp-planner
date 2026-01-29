@@ -25,12 +25,22 @@ public:
 
   // Space Jacobian (6 x n), ordering: [v; w]
   Status spatialJacobian(const Eigen::VectorXd& q, Eigen::MatrixXd* J_space) const;
+  Status spatialJacobian(const Eigen::VectorXd& q,
+                         Eigen::Ref<Eigen::MatrixXd> J_space) const;
 
   // Dual-quat RMRC
   Status rmrcIncrement(const DualQuat& dq_i,
                        const DualQuat& dq_f,
                        const Eigen::VectorXd& q_current,
                        Eigen::VectorXd* dq) const;
+  struct RmrcWorkspace {
+    Eigen::MatrixXd s_jac;  // 6 x n
+  };
+  Status rmrcIncrement(const DualQuat& dq_i,
+                       const DualQuat& dq_f,
+                       const Eigen::VectorXd& q_current,
+                       Eigen::VectorXd* dq,
+                       RmrcWorkspace* ws) const;
 
 private:
   ManipulatorModel model_;

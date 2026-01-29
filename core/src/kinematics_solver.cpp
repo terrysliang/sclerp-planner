@@ -104,6 +104,21 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
 
   const int n = model_.dof();
   J_space->resize(6, n);
+  return spatialJacobian(q, Eigen::Ref<Eigen::MatrixXd>(*J_space));
+}
+
+Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
+                                         Eigen::Ref<Eigen::MatrixXd> J_space) const {
+  if (q.size() != model_.dof()) {
+    log(LogLevel::Error, "spatialJacobian: q size mismatch");
+    return Status::InvalidParameter;
+  }
+
+  const int n = model_.dof();
+  if (J_space.rows() != 6 || J_space.cols() != n) {
+    log(LogLevel::Error, "spatialJacobian: output size mismatch");
+    return Status::InvalidParameter;
+  }
 
   const ScrewMatrix& S_space = model_.S_space(); // [w; v] columns
 
@@ -111,7 +126,7 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
     Eigen::Matrix<double, 6, 1> twist;
     twist.head<3>() = S_space.block<3,1>(3, 0);  // v
     twist.tail<3>() = S_space.block<3,1>(0, 0);  // w
-    J_space->col(0) = twist;
+    J_space.col(0) = twist;
   }
 
   Eigen::Matrix<double, 6, 1> twist;
@@ -121,7 +136,7 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
     const AdjointMatrix Ad = adjointVW(prod);
     twist.head<3>() = S_space.block<3,1>(3, i);  // v
     twist.tail<3>() = S_space.block<3,1>(0, i);  // w
-    J_space->col(i) = Ad * twist;
+    J_space.col(i) = Ad * twist;
   }
 
   return Status::Success;
@@ -131,6 +146,14 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
                                        const DualQuat& dq_f,
                                        const Eigen::VectorXd& q_current,
                                        Eigen::VectorXd* dq) const {
+  return rmrcIncrement(dq_i, dq_f, q_current, dq, nullptr);
+}
+
+Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
+                                       const DualQuat& dq_f,
+                                       const Eigen::VectorXd& q_current,
+                                       Eigen::VectorXd* dq,
+                                       RmrcWorkspace* ws) const {
   if (!dq) {
     log(LogLevel::Error, "rmrcIncrement: null output pointer");
     return Status::InvalidParameter;
@@ -163,8 +186,13 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
   gamma_f(5) = q_f.y();
   gamma_f(6) = q_f.z();
 
-  Eigen::MatrixXd s_jac;
-  const Status st = spatialJacobian(q_current, &s_jac);
+  Eigen::MatrixXd local_s_jac;
+  Eigen::MatrixXd& s_jac = ws ? ws->s_jac : local_s_jac;
+  const int n = model_.dof();
+  if (s_jac.rows() != 6 || s_jac.cols() != n) {
+    s_jac.resize(6, n);
+  }
+  const Status st = spatialJacobian(q_current, Eigen::Ref<Eigen::MatrixXd>(s_jac));
   if (!ok(st)) {
     log(LogLevel::Error, "rmrcIncrement: spatialJacobian failed");
     return st;

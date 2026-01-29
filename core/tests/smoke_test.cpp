@@ -145,11 +145,11 @@ static void test_motion_plan() {
 
   auto res = sclerp::core::planMotionSclerp(solver, req, opt);
   assert(res.status == Status::Success);
-  assert(res.trajectory.size() >= 2);
+  assert(res.path.size() >= 2);
 
   // Verify final pose close to goal
   Transform g_end = Transform::Identity();
-  assert(ok(solver.forwardKinematics(res.trajectory.positions.back(), &g_end)));
+  assert(ok(solver.forwardKinematics(res.path.positions.back(), &g_end)));
 
   const double dp = sclerp::core::positionDistance(g_end, g_f);
   const double dr = sclerp::core::rotationDistance(g_end, g_f);

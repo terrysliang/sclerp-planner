@@ -4,7 +4,6 @@
 #include "sclerp/core/math/types.hpp"
 
 #include <cstdint>
-#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -52,7 +51,6 @@ public:
   const JointSpec& joint(int i) const { return joints_.at(static_cast<size_t>(i)); }
 
   const std::vector<std::string>& joint_names() const { return joint_names_; }
-  const std::map<std::string, unsigned int>& joint_name_id_map() const { return joint_name_id_map_; }
 
   const Transform& ee_home() const { return ee_home_; }       // gst0_
   const ScrewMatrix& S_space() const { return S_space_; }     // cached 6 x n
@@ -72,7 +70,6 @@ private:
   std::vector<JointSpec> joints_;
 
   std::vector<std::string> joint_names_;
-  std::map<std::string, unsigned int> joint_name_id_map_;
 
   Transform ee_home_{Transform::Identity()};
   ScrewMatrix S_space_;  // 6 x n

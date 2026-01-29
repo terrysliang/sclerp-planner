@@ -35,6 +35,15 @@ static int parseIntArg(int argc, char** argv, const char* key, int def) {
   return def;
 }
 
+static bool parseFlag(int argc, char** argv, const char* key) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], key) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static ManipulatorModel makeBenchModel(int dof) {
   const double link_len = 0.3;
   Transform M = Transform::Identity();
@@ -222,12 +231,16 @@ int main(int argc, char** argv) {
   if (argc > 1 && (std::strcmp(argv[1], "--help") == 0 ||
                    std::strcmp(argv[1], "-h") == 0)) {
     std::cout << "Usage: sclerp_core_benchmark [--dof=N] [--jac-iters=N] [--rmrc-iters=N]\n";
+    std::cout << "  Optional: --trials=N --warmup=N\n";
     return 0;
   }
 
   const int dof = parseIntArg(argc, argv, "--dof", 7);
   const int jac_iters = parseIntArg(argc, argv, "--jac-iters", 20000);
   const int rmrc_iters = parseIntArg(argc, argv, "--rmrc-iters", 10000);
+  const int trials = parseIntArg(argc, argv, "--trials", 5);
+  const int warmup = parseIntArg(argc, argv, "--warmup", 1);
+  const bool quiet = parseFlag(argc, argv, "--quiet");
 
   ManipulatorModel model = makeBenchModel(dof);
   KinematicsSolver solver(model);
@@ -237,40 +250,28 @@ int main(int argc, char** argv) {
   Eigen::MatrixXd J_base;
   double acc = 0.0;
 
-  const double jac_ms = benchMs([&]() {
+  auto run_jac = [&](bool baseline) {
     for (int i = 0; i < jac_iters; ++i) {
       const double t = 0.001 * static_cast<double>(i);
       for (int j = 0; j < dof; ++j) {
         q(j) = 0.2 * std::sin(t + 0.3 * j);
       }
-      const Status st = solver.spatialJacobian(q, &J);
+      const Status st = baseline
+        ? spatialJacobianBaseline(model, q, &J_base)
+        : solver.spatialJacobian(q, &J);
       if (!ok(st)) {
         std::cerr << "spatialJacobian failed\n";
         std::exit(1);
       }
-      acc += J(0, 0);
+      acc += baseline ? J_base(0, 0) : J(0, 0);
     }
-  });
-
-  const double jac_base_ms = benchMs([&]() {
-    for (int i = 0; i < jac_iters; ++i) {
-      const double t = 0.001 * static_cast<double>(i);
-      for (int j = 0; j < dof; ++j) {
-        q(j) = 0.2 * std::sin(t + 0.3 * j);
-      }
-      const Status st = spatialJacobianBaseline(model, q, &J_base);
-      if (!ok(st)) {
-        std::cerr << "spatialJacobianBaseline failed\n";
-        std::exit(1);
-      }
-      acc += J_base(0, 0);
-    }
-  });
+  };
 
   Eigen::VectorXd dq = Eigen::VectorXd::Zero(dof);
   Eigen::VectorXd dq_base = Eigen::VectorXd::Zero(dof);
   Transform g_i = Transform::Identity();
   Transform g_f = Transform::Identity();
+  KinematicsSolver::RmrcWorkspace rmrc_ws;
 
   Eigen::VectorXd q_goal = q;
   if (dof > 0) q_goal(0) += 0.3;
@@ -280,48 +281,71 @@ int main(int argc, char** argv) {
   }
   const DualQuat dq_f(g_f);
 
-  const double rmrc_ms = benchMs([&]() {
+  auto run_rmrc = [&](bool baseline) {
     for (int i = 0; i < rmrc_iters; ++i) {
       const double t = 0.002 * static_cast<double>(i);
       for (int j = 0; j < dof; ++j) {
         q(j) = 0.15 * std::sin(t + 0.2 * j);
       }
-      if (!ok(solver.forwardKinematics(q, &g_i))) {
+      const Status fk_st = baseline
+        ? forwardKinematicsBaseline(model, q, &g_i)
+        : solver.forwardKinematics(q, &g_i);
+      if (!ok(fk_st)) {
         std::cerr << "forwardKinematics failed\n";
         std::exit(1);
       }
       const DualQuat dq_i(g_i);
-      const Status st = solver.rmrcIncrement(dq_i, dq_f, q, &dq);
+      const Status st = baseline
+        ? rmrcIncrementBaseline(model, dq_i, dq_f, q, &dq_base)
+        : solver.rmrcIncrement(dq_i, dq_f, q, &dq, &rmrc_ws);
       if (!ok(st)) {
         std::cerr << "rmrcIncrement failed\n";
         std::exit(1);
       }
-      acc += dq.sum();
+      acc += baseline ? dq_base.sum() : dq.sum();
     }
-  });
+  };
 
-  const double rmrc_base_ms = benchMs([&]() {
-    for (int i = 0; i < rmrc_iters; ++i) {
-      const double t = 0.002 * static_cast<double>(i);
-      for (int j = 0; j < dof; ++j) {
-        q(j) = 0.15 * std::sin(t + 0.2 * j);
-      }
-      if (!ok(forwardKinematicsBaseline(model, q, &g_i))) {
-        std::cerr << "forwardKinematics failed\n";
-        std::exit(1);
-      }
-      const DualQuat dq_i(g_i);
-      const Status st = rmrcIncrementBaseline(model, dq_i, dq_f, q, &dq_base);
-      if (!ok(st)) {
-        std::cerr << "rmrcIncrementBaseline failed\n";
-        std::exit(1);
-      }
-      acc += dq_base.sum();
+  std::vector<double> jac_runs;
+  std::vector<double> jac_base_runs;
+  std::vector<double> rmrc_runs;
+  std::vector<double> rmrc_base_runs;
+  jac_runs.reserve(trials);
+  jac_base_runs.reserve(trials);
+  rmrc_runs.reserve(trials);
+  rmrc_base_runs.reserve(trials);
+
+  for (int i = 0; i < warmup; ++i) {
+    run_jac(false);
+    run_jac(true);
+    run_rmrc(false);
+    run_rmrc(true);
+  }
+
+  for (int i = 0; i < trials; ++i) {
+    jac_runs.push_back(benchMs([&]() { run_jac(false); }));
+    jac_base_runs.push_back(benchMs([&]() { run_jac(true); }));
+    rmrc_runs.push_back(benchMs([&]() { run_rmrc(false); }));
+    rmrc_base_runs.push_back(benchMs([&]() { run_rmrc(true); }));
+    if (!quiet) {
+      std::cout << "trial " << (i + 1) << "/" << trials << " done\n";
     }
-  });
+  }
+
+  auto median = [](std::vector<double> v) {
+    if (v.empty()) return 0.0;
+    std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+    return v[v.size() / 2];
+  };
+
+  const double jac_ms = median(jac_runs);
+  const double jac_base_ms = median(jac_base_runs);
+  const double rmrc_ms = median(rmrc_runs);
+  const double rmrc_base_ms = median(rmrc_base_runs);
 
   std::cout << "sclerp_core_benchmark\n";
   std::cout << "  dof: " << dof << "\n";
+  std::cout << "  trials: " << trials << " (warmup " << warmup << ")\n";
   std::cout << "  spatialJacobian: " << jac_ms << " ms total, "
             << (jac_ms * 1000.0 / jac_iters) << " us/call\n";
   std::cout << "  spatialJacobian (baseline): " << jac_base_ms << " ms total, "

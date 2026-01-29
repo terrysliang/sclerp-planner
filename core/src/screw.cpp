@@ -42,7 +42,7 @@ Status screwParameters(const Transform& g_i,
   const Vec3 w = logSO3(R);
   const double theta = w.norm();
 
-  // Pure translation / no motion handling (match kinlib behavior).
+  // Pure translation / no motion handling.
   if (theta < thr.pure_translation_rot_angle) {
     const double p_norm = p.norm();
     if (p_norm < thr.no_motion_magnitude) {

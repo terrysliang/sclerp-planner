@@ -87,11 +87,10 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   const double dp_fk = positionDistance(g_fk, req.g_i);
   const double dr_fk = rotationDistance(g_fk, req.g_i);
 
-  // Setup output trajectory
-  out.trajectory.joint_names = solver.model().joint_names();
-  out.trajectory.positions.clear();
-  out.trajectory.time_from_start.clear();
-  out.trajectory.positions.reserve(static_cast<std::size_t>(opt.max_iters) + 1);
+  // Setup output path
+  out.path.joint_names = solver.model().joint_names();
+  out.path.positions.clear();
+  out.path.positions.reserve(static_cast<std::size_t>(opt.max_iters) + 1);
   const bool fk_mismatch = (dp_fk > 1e-3 || dr_fk > 1e-2);
 
   if (!solver.model().within_limits(req.q_init, opt.q_init_tol)) {
@@ -109,7 +108,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   }
 
   Eigen::VectorXd q = req.q_init;
-  out.trajectory.positions.push_back(q);
+  out.path.positions.push_back(q);
 
   // loop parameters
   double tau = opt.tau;
@@ -132,6 +131,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   }
 
   int iters = 0;
+  KinematicsSolver::RmrcWorkspace rmrc_ws;
   Eigen::VectorXd dq(n);
   Eigen::VectorXd q_next(n);
   Eigen::VectorXd joint_delta(n);
@@ -153,7 +153,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
       }
     }
 
-    Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq);
+    Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq, &rmrc_ws);
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerp: rmrcIncrement failed");
       out.status = st;
@@ -188,7 +188,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
     }
 
     q = q_next;
-    out.trajectory.positions.push_back(q);
+    out.path.positions.push_back(q);
 
     st = solver.forwardKinematics(q, &g_current);
     if (!ok(st)) {

@@ -37,28 +37,24 @@ Status ManipulatorModel::init(std::vector<JointSpec> joints,
   joints_ = std::move(joints);
   ee_home_ = ee_home;
 
-  // Build names + map
+  // Build joint names
   joint_names_.clear();
   joint_names_.reserve(joints_.size());
-  joint_name_id_map_.clear();
 
   for (std::size_t i = 0; i < joints_.size(); ++i) {
     if (joints_[i].name.empty()) {
       joints_.clear();
       joint_names_.clear();
-      joint_name_id_map_.clear();
       log(LogLevel::Error, "ManipulatorModel: joint name is empty");
       return Status::InvalidParameter;
     }
     joint_names_.push_back(joints_[i].name);
-    joint_name_id_map_[joints_[i].name] = static_cast<unsigned int>(i);
   }
 
   const Status cache_st = rebuild_cache(thr);
   if (!ok(cache_st)) {
     joints_.clear();
     joint_names_.clear();
-    joint_name_id_map_.clear();
     log(LogLevel::Error, "ManipulatorModel: rebuild_cache failed");
     return cache_st;
   }
@@ -67,7 +63,6 @@ Status ManipulatorModel::init(std::vector<JointSpec> joints,
   if (!ok(val_st)) {
     joints_.clear();
     joint_names_.clear();
-    joint_name_id_map_.clear();
     log(LogLevel::Error, "ManipulatorModel: validate failed");
     return val_st;
   }

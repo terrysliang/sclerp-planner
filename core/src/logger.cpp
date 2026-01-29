@@ -1,7 +1,13 @@
 #include "sclerp/core/common/logger.hpp"
 
 #include <atomic>
+#include <cstdlib>
 #include <iostream>
+
+#ifndef _WIN32
+#include <unistd.h>
+#include <cstdio>
+#endif
 
 namespace sclerp::core {
 
@@ -18,6 +24,27 @@ const char* logLevelToString(LogLevel level) {
   return "UNKNOWN";
 }
 
+static bool useColor() {
+#ifdef _WIN32
+  return false;
+#else
+  static int cached = -1;
+  if (cached != -1) {
+    return cached == 1;
+  }
+  if (std::getenv("NO_COLOR") != nullptr) {
+    cached = 0;
+    return false;
+  }
+  if (!isatty(fileno(stderr))) {
+    cached = 0;
+    return false;
+  }
+  cached = 1;
+  return true;
+#endif
+}
+
 static const char* logLevelToColor(LogLevel level) {
   switch (level) {
     case LogLevel::Error: return "\x1b[31m";  // red
@@ -29,9 +56,14 @@ static const char* logLevelToColor(LogLevel level) {
 }
 
 static void defaultSink(LogLevel level, const std::string& msg) {
-  const char* color = logLevelToColor(level);
-  std::cerr << color << "[sclerp][" << logLevelToString(level) << "] "
-            << msg << "\x1b[0m\n";
+  if (useColor()) {
+    const char* color = logLevelToColor(level);
+    std::cerr << color << "[sclerp][" << logLevelToString(level) << "] "
+              << msg << "\x1b[0m\n";
+    return;
+  }
+  std::cerr << "[sclerp][" << logLevelToString(level) << "] "
+            << msg << "\n";
 }
 
 static LogSink sinkOrDefault() {
