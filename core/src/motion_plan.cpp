@@ -121,6 +121,9 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   }
 
   int iters = 0;
+  Eigen::VectorXd dq(n);
+  Eigen::VectorXd q_next(n);
+  Eigen::VectorXd joint_delta(n);
   while (!((pos_dist < opt.pos_tol) && (rot_dist < opt.rot_tol)) &&
          (iters < opt.max_iters)) {
     ++iters;
@@ -139,7 +142,6 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
       }
     }
 
-    Eigen::VectorXd dq(n);
     Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq);
     if (!ok(st)) {
       out.status = st;
@@ -152,9 +154,6 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
       out.iters = iters;
       return out;
     }
-
-    Eigen::VectorXd q_next(n);
-    Eigen::VectorXd joint_delta(n);
 
     while (true) {
       joint_delta = dq * step_size;

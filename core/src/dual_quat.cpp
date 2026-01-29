@@ -153,7 +153,7 @@ DualQuat DualQuat::operator*(const DualQuat& rhs) const {
 }
 
 DualQuat DualQuat::pow(double t) const {
-  // Kinlib-style dual-quat power (raiseToPower).
+  // dual-quat power (raiseToPower).
   Eigen::Vector4d real_part = quatVec(qr_);
   Eigen::Vector4d dual_part = quatVec(qd_);
 
@@ -219,7 +219,7 @@ DualQuat DualQuat::pow(double t) const {
 }
 
 DualQuat DualQuat::interpolate(const DualQuat& a, const DualQuat& b, double t) {
-  // Kinlib-style interpolation: dq_i * (dq_i*^{-1} dq_f)^t
+  // dual-quat interpolation: dq_i * (dq_i*^{-1} dq_f)^t
   const DualQuat dq_i_conj = a.conjugate();
   DualQuat dq_rel = DualQuat::productRaw(dq_i_conj, b);
   dq_rel = dq_rel.pow(t);

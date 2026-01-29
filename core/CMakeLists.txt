@@ -78,3 +78,11 @@ if(SCLERP_BUILD_CORE_TESTS AND BUILD_TESTING)
 
   add_test(NAME sclerp_core_smoke_test COMMAND sclerp_core_smoke_test)
 endif()
+
+if(SCLERP_BUILD_BENCHMARKS)
+  add_executable(sclerp_core_benchmark
+    bench/perf_benchmark.cpp
+  )
+  target_link_libraries(sclerp_core_benchmark PRIVATE sclerp_core)
+  target_compile_features(sclerp_core_benchmark PRIVATE cxx_std_17)
+endif()

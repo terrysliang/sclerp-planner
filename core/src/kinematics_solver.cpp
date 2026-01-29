@@ -87,30 +87,23 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
   const int n = model_.dof();
   J_space->resize(6, n);
 
-  Eigen::MatrixXd joint_twists = Eigen::MatrixXd::Zero(6, n);
-  for (int i = 0; i < n; ++i) {
-    const auto& j = model_.joint(i);
-    if (j.type == JointType::Revolute) {
-      const Vec3 w = j.axis;
-      const Vec3 v = -w.cross(j.point);
-      joint_twists.block<3,1>(0, i) = v;
-      joint_twists.block<3,1>(3, i) = w;
-    } else if (j.type == JointType::Prismatic) {
-      joint_twists.block<3,1>(0, i) = j.axis;
-    } else {
-      // Fixed: zero
-    }
-  }
+  const ScrewMatrix& S_space = model_.S_space(); // [w; v] columns
 
   if (n > 0) {
-    J_space->col(0) = joint_twists.col(0);
+    Eigen::Matrix<double, 6, 1> twist;
+    twist.head<3>() = S_space.block<3,1>(3, 0);  // v
+    twist.tail<3>() = S_space.block<3,1>(0, 0);  // w
+    J_space->col(0) = twist;
   }
 
+  Eigen::Matrix<double, 6, 1> twist;
   Transform prod = Transform::Identity();  // Π_{k<i} exp(joint_k)
   for (int i = 1; i < n; ++i) {
     prod = prod * jointExp(model_.joint(i - 1), q(i - 1));
     const AdjointMatrix Ad = adjointVW(prod);
-    J_space->col(i) = Ad * joint_twists.col(i);
+    twist.head<3>() = S_space.block<3,1>(3, i);  // v
+    twist.tail<3>() = S_space.block<3,1>(0, i);  // w
+    J_space->col(i) = Ad * twist;
   }
 
   return Status::Success;
@@ -170,11 +163,13 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
   J2.block<3,4>(0,3) = 2.0 * hat3(p_i) * J1;
   J2.block<3,4>(3,3) = 2.0 * J1;
 
-  Eigen::MatrixXd temp = s_jac * s_jac.transpose();
-  Eigen::MatrixXd jac_pinv = s_jac.transpose() * temp.inverse();
-  Eigen::MatrixXd B = jac_pinv * J2;
+  Eigen::Matrix<double, 6, 6> temp = s_jac * s_jac.transpose();
+  Eigen::LDLT<Eigen::Matrix<double, 6, 6>> ldlt(temp);
+  Eigen::Matrix<double, 6, 7> X = ldlt.solve(J2);
+  const Eigen::Matrix<double, 7, 1> dgamma = (gamma_f - gamma_i);
+  const Eigen::Matrix<double, 6, 1> y = X * dgamma;
 
-  *dq = B * (gamma_f - gamma_i);
+  dq->noalias() = s_jac.transpose() * y;
   return Status::Success;
 }
 
