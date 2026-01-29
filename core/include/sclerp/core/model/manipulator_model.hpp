@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <map>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -42,9 +41,10 @@ class ManipulatorModel {
 public:
   ManipulatorModel() = default;
 
-  // Core constructor: joints + EE home transform gst0_
-  ManipulatorModel(std::vector<JointSpec> joints,
-                   const Transform& ee_home);
+  // Initialize model with joints + EE home transform gst0_
+  Status init(std::vector<JointSpec> joints,
+              const Transform& ee_home,
+              const Thresholds& thr = kDefaultThresholds);
 
   int dof() const { return static_cast<int>(joints_.size()); }
 
@@ -58,16 +58,16 @@ public:
   const ScrewMatrix& S_space() const { return S_space_; }     // cached 6 x n
 
   // Optional: per-joint reference transforms gst0_i (base -> joint frame at zero)
-  void set_joint_home_transforms(std::vector<Transform> gst0_i);
+  Status set_joint_home_transforms(std::vector<Transform> gst0_i);
   const std::optional<std::vector<Transform>>& joint_home_transforms() const { return gst0_i_; }
 
   // Validation / limit helpers
-  void validate(const Thresholds& thr = kDefaultThresholds) const;
+  Status validate(const Thresholds& thr = kDefaultThresholds) const;
   bool within_limits(const Eigen::VectorXd& q, double tol = 0.0) const;
-  Eigen::VectorXd clamp_to_limits(const Eigen::VectorXd& q) const;
+  Status clamp_to_limits(const Eigen::VectorXd& q, Eigen::VectorXd* out) const;
 
 private:
-  void rebuild_cache(const Thresholds& thr);
+  Status rebuild_cache(const Thresholds& thr);
 
   std::vector<JointSpec> joints_;
 
@@ -101,8 +101,8 @@ public:
   ManipulatorBuilder& add_fixed(std::string name,
                                 Transform joint_tip_home = Transform::Identity());
 
-  // Warning: thr is only used for validation; screw-axis normalization uses defaults from kDefaultThresholds.
-  ManipulatorModel build(const Thresholds& thr = kDefaultThresholds) const;
+  // Builds and validates the model using provided thresholds.
+  Status build(ManipulatorModel* out, const Thresholds& thr = kDefaultThresholds) const;
 
 private:
   std::vector<JointSpec> joints_;

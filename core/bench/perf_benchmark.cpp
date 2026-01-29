@@ -53,7 +53,21 @@ static ManipulatorModel makeBenchModel(int dof) {
     const Vec3 point(link_len * i, 0.0, 0.0);
     builder.add_revolute("j" + std::to_string(i + 1), axis, point);
   }
-  return builder.build();
+  ManipulatorModel model;
+  const Status st = builder.build(&model);
+  if (!ok(st)) {
+    std::cerr << "ManipulatorBuilder build failed\n";
+    std::exit(1);
+  }
+  return model;
+}
+
+static Mat3 hat3Local(const Vec3& w) {
+  Mat3 W;
+  W <<     0.0, -w.z(),  w.y(),
+        w.z(),     0.0, -w.x(),
+       -w.y(),  w.x(),     0.0;
+  return W;
 }
 
 static Transform jointExpBench(const sclerp::core::JointSpec& j, double q) {
@@ -78,16 +92,30 @@ static AdjointMatrix adjointVWBench(const Transform& T) {
   AdjointMatrix Ad = AdjointMatrix::Zero();
   Ad.block<3,3>(0,0) = R;
   Ad.block<3,3>(3,3) = R;
-  Ad.block<3,3>(0,3) = sclerp::core::hat3(p) * R;
+  Ad.block<3,3>(0,3) = hat3Local(p) * R;
   return Ad;
 }
 
-static Status spatialJacobianBaseline(const KinematicsSolver& solver,
+static Status forwardKinematicsBaseline(const ManipulatorModel& model,
+                                        const Eigen::VectorXd& q,
+                                        Transform* g_base_tool) {
+  if (!g_base_tool) return Status::InvalidParameter;
+  if (q.size() != model.dof()) return Status::InvalidParameter;
+
+  const int n = model.dof();
+  Transform prod = Transform::Identity();
+  for (int i = 0; i < n; ++i) {
+    prod = prod * jointExpBench(model.joint(i), q(i));
+  }
+  *g_base_tool = prod * model.ee_home();
+  return Status::Success;
+}
+
+static Status spatialJacobianBaseline(const ManipulatorModel& model,
                                       const Eigen::VectorXd& q,
                                       Eigen::MatrixXd* J_space) {
   if (!J_space) return Status::InvalidParameter;
 
-  const auto& model = solver.model();
   const int n = model.dof();
   if (q.size() != n) return Status::InvalidParameter;
 
@@ -120,7 +148,7 @@ static Status spatialJacobianBaseline(const KinematicsSolver& solver,
   return Status::Success;
 }
 
-static Status rmrcIncrementBaseline(const KinematicsSolver& solver,
+static Status rmrcIncrementBaseline(const ManipulatorModel& model,
                                     const DualQuat& dq_i,
                                     const DualQuat& dq_f,
                                     const Eigen::VectorXd& q_current,
@@ -150,7 +178,7 @@ static Status rmrcIncrementBaseline(const KinematicsSolver& solver,
   gamma_f(6) = q_f.z();
 
   Eigen::MatrixXd s_jac;
-  const Status st = solver.spatialJacobian(q_current, &s_jac);
+  const Status st = spatialJacobianBaseline(model, q_current, &s_jac);
   if (!ok(st)) return st;
 
   Eigen::Vector4d qv;
@@ -170,7 +198,7 @@ static Status rmrcIncrementBaseline(const KinematicsSolver& solver,
 
   Eigen::Matrix<double, 6, 7> J2 = Eigen::Matrix<double, 6, 7>::Zero();
   J2.block<3,3>(0,0) = Mat3::Identity();
-  J2.block<3,4>(0,3) = 2.0 * sclerp::core::hat3(p_i) * J1;
+  J2.block<3,4>(0,3) = 2.0 * hat3Local(p_i) * J1;
   J2.block<3,4>(3,3) = 2.0 * J1;
 
   Eigen::MatrixXd temp = s_jac * s_jac.transpose();
@@ -230,7 +258,7 @@ int main(int argc, char** argv) {
       for (int j = 0; j < dof; ++j) {
         q(j) = 0.2 * std::sin(t + 0.3 * j);
       }
-      const Status st = spatialJacobianBaseline(solver, q, &J_base);
+      const Status st = spatialJacobianBaseline(model, q, &J_base);
       if (!ok(st)) {
         std::cerr << "spatialJacobianBaseline failed\n";
         std::exit(1);
@@ -246,7 +274,7 @@ int main(int argc, char** argv) {
 
   Eigen::VectorXd q_goal = q;
   if (dof > 0) q_goal(0) += 0.3;
-  if (!ok(solver.forwardKinematics(q_goal, &g_f))) {
+  if (!ok(forwardKinematicsBaseline(model, q_goal, &g_f))) {
     std::cerr << "forwardKinematics failed\n";
     return 1;
   }
@@ -278,12 +306,12 @@ int main(int argc, char** argv) {
       for (int j = 0; j < dof; ++j) {
         q(j) = 0.15 * std::sin(t + 0.2 * j);
       }
-      if (!ok(solver.forwardKinematics(q, &g_i))) {
+      if (!ok(forwardKinematicsBaseline(model, q, &g_i))) {
         std::cerr << "forwardKinematics failed\n";
         std::exit(1);
       }
       const DualQuat dq_i(g_i);
-      const Status st = rmrcIncrementBaseline(solver, dq_i, dq_f, q, &dq_base);
+      const Status st = rmrcIncrementBaseline(model, dq_i, dq_f, q, &dq_base);
       if (!ok(st)) {
         std::cerr << "rmrcIncrementBaseline failed\n";
         std::exit(1);

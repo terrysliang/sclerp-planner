@@ -1,5 +1,6 @@
 #include "sclerp/core/planning/motion_plan.hpp"
 
+#include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/distance.hpp"
 #include "sclerp/core/screw/screw.hpp"
 
@@ -7,7 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
+#include <sstream>
 
 namespace sclerp::core {
 
@@ -59,14 +60,17 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
 
   const int n = solver.model().dof();
   if (n <= 0) {
+    log(LogLevel::Error, "planMotionSclerp: invalid dof");
     out.status = Status::InvalidParameter;
     return out;
   }
   if (req.q_init.size() != n) {
+    log(LogLevel::Error, "planMotionSclerp: q_init size mismatch");
     out.status = Status::InvalidParameter;
     return out;
   }
   if (opt.max_iters <= 0) {
+    log(LogLevel::Error, "planMotionSclerp: max_iters must be positive");
     out.status = Status::InvalidParameter;
     return out;
   }
@@ -75,6 +79,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   {
     const Status st = solver.forwardKinematics(req.q_init, &g_fk);
     if (!ok(st)) {
+      log(LogLevel::Error, "planMotionSclerp: forwardKinematics failed");
       out.status = st;
       return out;
     }
@@ -90,12 +95,17 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   const bool fk_mismatch = (dp_fk > 1e-3 || dr_fk > 1e-2);
 
   if (!solver.model().within_limits(req.q_init, opt.q_init_tol)) {
+    log(LogLevel::Error, "planMotionSclerp: q_init violates joint limits");
     out.status = Status::InvalidParameter;
     return out;
   }
   if (fk_mismatch) {
-    std::cerr << "[sclerp] Warning: g_i differs from FK(q_init) "
-              << "(dp=" << dp_fk << ", dr=" << dr_fk << "); using FK(q_init).\n";
+    if (shouldLog(LogLevel::Warn)) {
+      std::ostringstream oss;
+      oss << "g_i differs from FK(q_init) (dp=" << dp_fk << ", dr=" << dr_fk
+          << "); using FK(q_init).";
+      log(LogLevel::Warn, oss.str());
+    }
   }
 
   Eigen::VectorXd q = req.q_init;
@@ -116,6 +126,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   ScrewParameters base_screw;
   const Status st_screw = screwParameters(g_current, req.g_f, &base_screw, opt.thr);
   if (!ok(st_screw)) {
+    log(LogLevel::Error, "planMotionSclerp: screwParameters failed");
     out.status = st_screw;
     return out;
   }
@@ -144,12 +155,14 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
 
     Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq);
     if (!ok(st)) {
+      log(LogLevel::Error, "planMotionSclerp: rmrcIncrement failed");
       out.status = st;
       out.iters = iters;
       return out;
     }
 
     if (!dq.allFinite()) {
+      log(LogLevel::Error, "planMotionSclerp: RMRC produced NaN/Inf");
       out.status = Status::Failure;
       out.iters = iters;
       return out;
@@ -165,6 +178,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
 
       const double max_val = joint_delta.cwiseAbs().maxCoeff();
       if (max_val <= opt.joint_delta_min) {
+        log(LogLevel::Warn, "planMotionSclerp: joint limits reached");
         out.status = Status::JointLimit;
         out.iters = iters;
         return out;
@@ -178,6 +192,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
 
     st = solver.forwardKinematics(q, &g_current);
     if (!ok(st)) {
+      log(LogLevel::Error, "planMotionSclerp: forwardKinematics failed in loop");
       out.status = st;
       out.iters = iters;
       return out;
@@ -192,10 +207,14 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   if ((pos_dist < opt.pos_tol) && (rot_dist < opt.rot_tol)) {
     out.status = Status::Success;
   } else {
-    std::cerr << "[sclerp] planMotionSclerp reached max iters or stalled. "
-              << "pos_dist=" << pos_dist << " (tol=" << opt.pos_tol << "), "
-              << "rot_dist=" << rot_dist << " (tol=" << opt.rot_tol << "), "
-              << "tau=" << tau << ", iters=" << iters << "\n";
+    if (shouldLog(LogLevel::Warn)) {
+      std::ostringstream oss;
+      oss << "planMotionSclerp reached max iters or stalled. "
+          << "pos_dist=" << pos_dist << " (tol=" << opt.pos_tol << "), "
+          << "rot_dist=" << rot_dist << " (tol=" << opt.rot_tol << "), "
+          << "tau=" << tau << ", iters=" << iters;
+      log(LogLevel::Warn, oss.str());
+    }
     out.status = Status::Failure;
   }
   return out;

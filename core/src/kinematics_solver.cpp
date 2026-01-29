@@ -1,10 +1,10 @@
 #include "sclerp/core/kinematics/kinematics_solver.hpp"
 
+#include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/so3.hpp"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-#include <stdexcept>
 
 namespace sclerp::core {
 
@@ -42,8 +42,14 @@ static AdjointMatrix adjointVW(const Transform& T) {
 
 Status KinematicsSolver::forwardKinematics(const Eigen::VectorXd& q,
                                            Transform* g_base_tool) const {
-  if (!g_base_tool) return Status::InvalidParameter;
-  if (q.size() != model_.dof()) return Status::InvalidParameter;
+  if (!g_base_tool) {
+    log(LogLevel::Error, "forwardKinematics: null output pointer");
+    return Status::InvalidParameter;
+  }
+  if (q.size() != model_.dof()) {
+    log(LogLevel::Error, "forwardKinematics: q size mismatch");
+    return Status::InvalidParameter;
+  }
 
   const int n = model_.dof();
   Transform prod = Transform::Identity();
@@ -57,8 +63,14 @@ Status KinematicsSolver::forwardKinematics(const Eigen::VectorXd& q,
 
 Status KinematicsSolver::forwardKinematicsAll(const Eigen::VectorXd& q,
                                               std::vector<Transform>* intermediate_transforms) const {
-  if (!intermediate_transforms) return Status::InvalidParameter;
-  if (q.size() != model_.dof()) return Status::InvalidParameter;
+  if (!intermediate_transforms) {
+    log(LogLevel::Error, "forwardKinematicsAll: null output pointer");
+    return Status::InvalidParameter;
+  }
+  if (q.size() != model_.dof()) {
+    log(LogLevel::Error, "forwardKinematicsAll: q size mismatch");
+    return Status::InvalidParameter;
+  }
 
   intermediate_transforms->clear();
   intermediate_transforms->reserve(static_cast<std::size_t>(model_.dof()) + 1);
@@ -81,8 +93,14 @@ Status KinematicsSolver::forwardKinematicsAll(const Eigen::VectorXd& q,
 
 Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
                                          Eigen::MatrixXd* J_space) const {
-  if (!J_space) return Status::InvalidParameter;
-  if (q.size() != model_.dof()) return Status::InvalidParameter;
+  if (!J_space) {
+    log(LogLevel::Error, "spatialJacobian: null output pointer");
+    return Status::InvalidParameter;
+  }
+  if (q.size() != model_.dof()) {
+    log(LogLevel::Error, "spatialJacobian: q size mismatch");
+    return Status::InvalidParameter;
+  }
 
   const int n = model_.dof();
   J_space->resize(6, n);
@@ -113,8 +131,14 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
                                        const DualQuat& dq_f,
                                        const Eigen::VectorXd& q_current,
                                        Eigen::VectorXd* dq) const {
-  if (!dq) return Status::InvalidParameter;
-  if (q_current.size() != model_.dof()) return Status::InvalidParameter;
+  if (!dq) {
+    log(LogLevel::Error, "rmrcIncrement: null output pointer");
+    return Status::InvalidParameter;
+  }
+  if (q_current.size() != model_.dof()) {
+    log(LogLevel::Error, "rmrcIncrement: q size mismatch");
+    return Status::InvalidParameter;
+  }
 
   // RMRC in dual-quat form.
   const Transform g_i = dq_i.toTransform();
@@ -141,7 +165,10 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
 
   Eigen::MatrixXd s_jac;
   const Status st = spatialJacobian(q_current, &s_jac);
-  if (!ok(st)) return st;
+  if (!ok(st)) {
+    log(LogLevel::Error, "rmrcIncrement: spatialJacobian failed");
+    return st;
+  }
 
   Eigen::Vector4d qv;
   qv << q_i.w(), q_i.x(), q_i.y(), q_i.z();

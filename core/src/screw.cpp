@@ -1,5 +1,6 @@
 #include "sclerp/core/screw/screw.hpp"
 
+#include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/distance.hpp"
 #include "sclerp/core/math/se3.hpp"
 #include "sclerp/core/math/so3.hpp"
@@ -26,7 +27,10 @@ Status screwParameters(const Transform& g_i,
                        const Transform& g_f,
                        ScrewParameters* out,
                        const Thresholds& thr) {
-  if (!out) return Status::InvalidParameter;
+  if (!out) {
+    log(LogLevel::Error, "screwParameters: null output");
+    return Status::InvalidParameter;
+  }
 
   const Transform g_rel = g_i.inverse() * g_f;
   out->g_rel = g_rel;
@@ -128,6 +132,7 @@ NearestOnScrewResult nearestPoseOnScrew(const Transform& g_i,
     res.g_near = g_i;
     res.d_pos = positionDistance(res.g_near, g_t);
     res.d_rot = rotationDistance(res.g_near, g_t);
+    log(LogLevel::Error, "nearestPoseOnScrew: screwParameters failed");
     return res;
   }
 
@@ -177,7 +182,10 @@ Status screwSegments(const std::vector<Transform>& g_seq,
                      std::vector<unsigned int>* seg_end_indices,
                      double max_pos_d,
                      double max_rot_d) {
-  if (!seg_end_indices) return Status::InvalidParameter;
+  if (!seg_end_indices) {
+    log(LogLevel::Error, "screwSegments: null output");
+    return Status::InvalidParameter;
+  }
   seg_end_indices->clear();
 
   const int n = static_cast<int>(g_seq.size());
@@ -221,7 +229,10 @@ Status screwSegments(const std::vector<Mat4>& g_seq,
                      std::vector<unsigned int>* seg_end_indices,
                      double max_pos_d,
                      double max_rot_d) {
-  if (!seg_end_indices) return Status::InvalidParameter;
+  if (!seg_end_indices) {
+    log(LogLevel::Error, "screwSegments(Mat4): null output");
+    return Status::InvalidParameter;
+  }
   std::vector<Transform> seq;
   seq.reserve(g_seq.size());
   for (const auto& g : g_seq) {

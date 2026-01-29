@@ -1,9 +1,10 @@
 #include "sclerp/core/model/manipulator_model.hpp"
 
+#include "sclerp/core/common/logger.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 
 namespace sclerp::core {
 
@@ -11,20 +12,31 @@ static inline bool isFiniteVec3(const Vec3& v) {
   return std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
 }
 
-static inline Vec3 normalizeOrThrow(const Vec3& a, double eps, const char* what) {
-  if (!isFiniteVec3(a)) {
-    throw std::runtime_error(std::string("ManipulatorModel: non-finite ") + what);
+static inline Status normalizeOrAssign(Vec3* a, double eps) {
+  if (!a) {
+    log(LogLevel::Error, "ManipulatorModel: null axis pointer");
+    return Status::InvalidParameter;
   }
-  const double n = a.norm();
+  const Vec3& v = *a;
+  if (!isFiniteVec3(v)) {
+    log(LogLevel::Error, "ManipulatorModel: axis is non-finite");
+    return Status::InvalidParameter;
+  }
+  const double n = v.norm();
   if (!(n > eps)) {
-    throw std::runtime_error(std::string("ManipulatorModel: near-zero ") + what);
+    log(LogLevel::Error, "ManipulatorModel: axis norm too small");
+    return Status::InvalidParameter;
   }
-  return a / n;
+  *a = v / n;
+  return Status::Success;
 }
 
-ManipulatorModel::ManipulatorModel(std::vector<JointSpec> joints,
-                                   const Transform& ee_home)
-  : joints_(std::move(joints)), ee_home_(ee_home) {
+Status ManipulatorModel::init(std::vector<JointSpec> joints,
+                              const Transform& ee_home,
+                              const Thresholds& thr) {
+  joints_ = std::move(joints);
+  ee_home_ = ee_home;
+
   // Build names + map
   joint_names_.clear();
   joint_names_.reserve(joints_.size());
@@ -32,66 +44,96 @@ ManipulatorModel::ManipulatorModel(std::vector<JointSpec> joints,
 
   for (std::size_t i = 0; i < joints_.size(); ++i) {
     if (joints_[i].name.empty()) {
-      throw std::runtime_error("ManipulatorModel: joint name is empty");
+      joints_.clear();
+      joint_names_.clear();
+      joint_name_id_map_.clear();
+      log(LogLevel::Error, "ManipulatorModel: joint name is empty");
+      return Status::InvalidParameter;
     }
     joint_names_.push_back(joints_[i].name);
     joint_name_id_map_[joints_[i].name] = static_cast<unsigned int>(i);
   }
 
-  rebuild_cache(kDefaultThresholds);
-  validate(kDefaultThresholds);
+  const Status cache_st = rebuild_cache(thr);
+  if (!ok(cache_st)) {
+    joints_.clear();
+    joint_names_.clear();
+    joint_name_id_map_.clear();
+    log(LogLevel::Error, "ManipulatorModel: rebuild_cache failed");
+    return cache_st;
+  }
+
+  const Status val_st = validate(thr);
+  if (!ok(val_st)) {
+    joints_.clear();
+    joint_names_.clear();
+    joint_name_id_map_.clear();
+    log(LogLevel::Error, "ManipulatorModel: validate failed");
+    return val_st;
+  }
+  return Status::Success;
 }
 
-void ManipulatorModel::set_joint_home_transforms(std::vector<Transform> gst0_i) {
+Status ManipulatorModel::set_joint_home_transforms(std::vector<Transform> gst0_i) {
   // Optional: accept n or n+1 (some pipelines include EE as last).
   if (!gst0_i.empty()) {
     const std::size_t n = joints_.size();
     if (gst0_i.size() != n && gst0_i.size() != n + 1) {
-      throw std::runtime_error("ManipulatorModel: gst0_i size must be dof() or dof()+1");
+      log(LogLevel::Error, "ManipulatorModel: gst0_i size mismatch");
+      return Status::InvalidParameter;
     }
   }
   gst0_i_ = std::move(gst0_i);
+  return Status::Success;
 }
 
-void ManipulatorModel::validate(const Thresholds& thr) const {
+Status ManipulatorModel::validate(const Thresholds& thr) const {
   // Basic checks
   if (!std::isfinite(ee_home_.translation().x()) ||
       !std::isfinite(ee_home_.translation().y()) ||
       !std::isfinite(ee_home_.translation().z())) {
-    throw std::runtime_error("ManipulatorModel: ee_home translation is non-finite");
+    log(LogLevel::Error, "ManipulatorModel: ee_home translation is non-finite");
+    return Status::InvalidParameter;
   }
 
   for (std::size_t i = 0; i < joints_.size(); ++i) {
     const auto& j = joints_[i];
 
     if (j.name.empty()) {
-      throw std::runtime_error("ManipulatorModel: joint name is empty");
+      log(LogLevel::Error, "ManipulatorModel: joint name is empty");
+      return Status::InvalidParameter;
     }
 
     if (j.type == JointType::Revolute || j.type == JointType::Prismatic) {
       if (!isFiniteVec3(j.axis)) {
-        throw std::runtime_error("ManipulatorModel: joint axis is non-finite");
+        log(LogLevel::Error, "ManipulatorModel: joint axis is non-finite");
+        return Status::InvalidParameter;
       }
       if (!(j.axis.norm() > thr.axis_norm_eps)) {
-        throw std::runtime_error("ManipulatorModel: joint axis norm too small");
+        log(LogLevel::Error, "ManipulatorModel: joint axis norm too small");
+        return Status::InvalidParameter;
       }
     }
 
     if (j.type == JointType::Revolute) {
       if (!isFiniteVec3(j.point)) {
-        throw std::runtime_error("ManipulatorModel: joint point is non-finite");
+        log(LogLevel::Error, "ManipulatorModel: joint point is non-finite");
+        return Status::InvalidParameter;
       }
     }
 
     if (j.limit.enabled) {
       if (!std::isfinite(j.limit.lower) || !std::isfinite(j.limit.upper)) {
-        throw std::runtime_error("ManipulatorModel: joint limits are non-finite");
+        log(LogLevel::Error, "ManipulatorModel: joint limits are non-finite");
+        return Status::InvalidParameter;
       }
       if (j.limit.lower > j.limit.upper) {
-        throw std::runtime_error("ManipulatorModel: joint lower > upper");
+        log(LogLevel::Error, "ManipulatorModel: joint lower > upper");
+        return Status::InvalidParameter;
       }
     }
   }
+  return Status::Success;
 }
 
 bool ManipulatorModel::within_limits(const Eigen::VectorXd& q, double tol) const {
@@ -108,22 +150,27 @@ bool ManipulatorModel::within_limits(const Eigen::VectorXd& q, double tol) const
   return true;
 }
 
-Eigen::VectorXd ManipulatorModel::clamp_to_limits(const Eigen::VectorXd& q) const {
+Status ManipulatorModel::clamp_to_limits(const Eigen::VectorXd& q, Eigen::VectorXd* out) const {
+  if (!out) {
+    log(LogLevel::Error, "ManipulatorModel: clamp_to_limits null output");
+    return Status::InvalidParameter;
+  }
   if (q.size() != dof()) {
-    throw std::runtime_error("ManipulatorModel::clamp_to_limits: q size mismatch");
+    log(LogLevel::Error, "ManipulatorModel: clamp_to_limits size mismatch");
+    return Status::InvalidParameter;
   }
 
-  Eigen::VectorXd out = q;
+  *out = q;
   for (int i = 0; i < dof(); ++i) {
     const auto& lim = joints_[static_cast<std::size_t>(i)].limit;
     if (!lim.enabled) continue;
 
-    out(i) = std::min(std::max(out(i), lim.lower), lim.upper);
+    (*out)(i) = std::min(std::max((*out)(i), lim.lower), lim.upper);
   }
-  return out;
+  return Status::Success;
 }
 
-void ManipulatorModel::rebuild_cache(const Thresholds& thr) {
+Status ManipulatorModel::rebuild_cache(const Thresholds& thr) {
   const int n = dof();
   S_space_.resize(6, n);
   S_space_.setZero();
@@ -139,7 +186,8 @@ void ManipulatorModel::rebuild_cache(const Thresholds& thr) {
     }
 
     // Normalize axis and store back (invariant)
-    j.axis = normalizeOrThrow(j.axis, thr.axis_norm_eps, "joint axis");
+    Status st = normalizeOrAssign(&j.axis, thr.axis_norm_eps);
+    if (!ok(st)) return st;
 
     if (j.type == JointType::Revolute) {
       // S = [w; v], v = -w x q
@@ -164,6 +212,7 @@ void ManipulatorModel::rebuild_cache(const Thresholds& thr) {
       j.point.setZero();
     }
   }
+  return Status::Success;
 }
 
 // -------- Builder --------
@@ -212,14 +261,16 @@ ManipulatorBuilder& ManipulatorBuilder::add_fixed(std::string name,
   return *this;
 }
 
-ManipulatorModel ManipulatorBuilder::build(const Thresholds& thr) const {
-  if (!ee_home_.has_value()) {
-    throw std::runtime_error("ManipulatorBuilder: ee_home not set");
+Status ManipulatorBuilder::build(ManipulatorModel* out, const Thresholds& thr) const {
+  if (!out) {
+    log(LogLevel::Error, "ManipulatorBuilder: output model is null");
+    return Status::InvalidParameter;
   }
-  ManipulatorModel m(joints_, *ee_home_);
-  // Constructor already rebuilds + validates using defaults; revalidate with provided thresholds if desired:
-  m.validate(thr);
-  return m;
+  if (!ee_home_.has_value()) {
+    log(LogLevel::Error, "ManipulatorBuilder: ee_home not set");
+    return Status::InvalidParameter;
+  }
+  return out->init(joints_, *ee_home_, thr);
 }
 
 }  // namespace sclerp::core

@@ -33,11 +33,15 @@ static void test_fk_and_jacobian() {
   Transform M = Transform::Identity();
   M.translation() = Vec3(L1 + L2, 0.0, 0.0);
 
-  ManipulatorModel model = ManipulatorBuilder{}
-    .set_ee_home(M)
-    .add_revolute("j1", Vec3(0,0,1), Vec3(0,0,0))
-    .add_revolute("j2", Vec3(0,0,1), Vec3(L1,0,0))
-    .build();
+  ManipulatorModel model;
+  {
+    const Status st = ManipulatorBuilder{}
+      .set_ee_home(M)
+      .add_revolute("j1", Vec3(0,0,1), Vec3(0,0,0))
+      .add_revolute("j2", Vec3(0,0,1), Vec3(L1,0,0))
+      .build(&model);
+    assert(ok(st));
+  }
 
   KinematicsSolver solver(model);
 
@@ -104,11 +108,15 @@ static void test_motion_plan() {
   lim.lower = -M_PI;
   lim.upper = M_PI;
 
-  ManipulatorModel model = ManipulatorBuilder{}
-    .set_ee_home(M)
-    .add_revolute("j1", Vec3(0,0,1), Vec3(0,0,0), lim)
-    .add_revolute("j2", Vec3(0,0,1), Vec3(L1,0,0), lim)
-    .build();
+  ManipulatorModel model;
+  {
+    const Status st = ManipulatorBuilder{}
+      .set_ee_home(M)
+      .add_revolute("j1", Vec3(0,0,1), Vec3(0,0,0), lim)
+      .add_revolute("j2", Vec3(0,0,1), Vec3(L1,0,0), lim)
+      .build(&model);
+    assert(ok(st));
+  }
 
   KinematicsSolver solver(model);
 

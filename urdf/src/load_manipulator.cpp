@@ -1,8 +1,9 @@
 #include "sclerp/urdf/load_manipulator.hpp"
 
+#include "sclerp/core/common/logger.hpp"
+
 #include <fstream>
 #include <sstream>
-#include <stdexcept>
 #include <algorithm>
 #include <Eigen/Geometry>
 
@@ -28,18 +29,23 @@ static Transform poseToEigen(const ::urdf::Pose& p) {
   return T;
 }
 
-static std::string readFileToString(const std::string& path) {
+static Status readFileToString(const std::string& path, std::string* out) {
+  if (!out) return Status::InvalidParameter;
   std::ifstream ifs(path);
-  if (!ifs) throw std::runtime_error("Failed to open URDF file: " + path);
+  if (!ifs) return Status::Failure;
   std::ostringstream oss;
   oss << ifs.rdbuf();
-  return oss.str();
+  *out = oss.str();
+  return Status::Success;
 }
 
 static LoadResult fail(Status st, std::string msg) {
   LoadResult r;
   r.status = st;
   r.message = std::move(msg);
+  if (shouldLog((st == Status::Failure) ? LogLevel::Error : LogLevel::Warn)) {
+    log((st == Status::Failure) ? LogLevel::Error : LogLevel::Warn, r.message);
+  }
   return r;
 }
 
@@ -224,26 +230,27 @@ LoadResult loadManipulatorModelFromString(const std::string& urdf_xml,
 
   const Transform ee_home = T_base_tip0 * opt.tool_offset;
 
-  try {
-    ManipulatorModel out_model(std::move(joints), ee_home);
-    LoadResult res;
-    res.status = Status::Success;
-    res.model = std::move(out_model);
-    res.message = "OK";
-    return res;
-  } catch (const std::exception& e) {
-    return fail(Status::Failure, std::string("ManipulatorModel construction failed: ") + e.what());
+  ManipulatorModel out_model;
+  const Status st = out_model.init(std::move(joints), ee_home);
+  if (!ok(st)) {
+    return fail(st, "ManipulatorModel init failed");
   }
+
+  LoadResult res;
+  res.status = Status::Success;
+  res.model = std::move(out_model);
+  res.message = "OK";
+  return res;
 }
 
 LoadResult loadManipulatorModelFromFile(const std::string& urdf_path,
                                         const LoadOptions& opt) {
-  try {
-    const std::string xml = readFileToString(urdf_path);
-    return loadManipulatorModelFromString(xml, opt);
-  } catch (const std::exception& e) {
-    return fail(Status::Failure, e.what());
+  std::string xml;
+  const Status st = readFileToString(urdf_path, &xml);
+  if (!ok(st)) {
+    return fail(st, "Failed to open URDF file: " + urdf_path);
   }
+  return loadManipulatorModelFromString(xml, opt);
 }
 
 }  // namespace sclerp::urdf
