@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(SCLERP_BUILD_CORE "Build sclerp_core library" ON)
 option(SCLERP_BUILD_URDF "Build URDF loader module" ON)
+option(SCLERP_BUILD_COLLISION "Build collision module" OFF)
 option(SCLERP_BUILD_TESTS "Build tests" OFF)
 option(SCLERP_BUILD_CORE_TESTS "Build core tests" ${SCLERP_BUILD_TESTS})
 option(SCLERP_BUILD_URDF_TESTS "Build URDF tests" ${SCLERP_BUILD_TESTS})
@@ -14,6 +15,9 @@ option(SCLERP_BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 if(SCLERP_BUILD_URDF AND NOT SCLERP_BUILD_CORE)
   message(FATAL_ERROR "SCLERP_BUILD_URDF requires SCLERP_BUILD_CORE=ON")
+endif()
+if(SCLERP_BUILD_COLLISION AND NOT SCLERP_BUILD_CORE)
+  message(FATAL_ERROR "SCLERP_BUILD_COLLISION requires SCLERP_BUILD_CORE=ON")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -35,4 +39,8 @@ endif()
 
 if(SCLERP_BUILD_URDF)
   add_subdirectory(urdf)
+endif()
+
+if(SCLERP_BUILD_COLLISION)
+  add_subdirectory(collision)
 endif()
