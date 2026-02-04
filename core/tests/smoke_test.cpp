@@ -84,7 +84,7 @@ static void test_fk_and_jacobian() {
     assert(ok(solver.forwardKinematics(qn, &gn)));
 
     Transform Trel = gn * g.inverse();
-    const auto xi = sclerp::core::logSE3(Trel) / eps;
+    const sclerp::core::Twist xi = (sclerp::core::logSE3(Trel) / eps).eval();
     Eigen::Matrix<double, 6, 1> xi_vk;
     xi_vk.head<3>() = xi.tail<3>();
     xi_vk.tail<3>() = xi.head<3>();

@@ -81,40 +81,19 @@ include(CTest)
 if(SCLERP_BUILD_TESTS AND BUILD_TESTING)
   enable_testing()
 
-  add_executable(sclerp_collision_compat_test
-    tests/compat_test.cpp
+  add_executable(sclerp_collision_unit_test
+    tests/unit_test.cpp
   )
-  target_link_libraries(sclerp_collision_compat_test PRIVATE sclerp_collision)
-  target_compile_features(sclerp_collision_compat_test PRIVATE cxx_std_17)
+  target_link_libraries(sclerp_collision_unit_test PRIVATE sclerp_collision)
+  target_compile_features(sclerp_collision_unit_test PRIVATE cxx_std_17)
 
-  add_test(NAME sclerp_collision_compat_test COMMAND sclerp_collision_compat_test)
+  add_test(NAME sclerp_collision_unit_test COMMAND sclerp_collision_unit_test)
 endif()
 
-option(SCLERP_BUILD_KINLIB_COMPAT_TEST "Build kinlib compatibility test" OFF)
-set(SCLERP_KINLIB_PREFIX "" CACHE PATH "Prefix where kinlib is installed")
-
-if(SCLERP_BUILD_KINLIB_COMPAT_TEST AND SCLERP_BUILD_TESTS AND BUILD_TESTING)
-  set(_kinlib_hints)
-  if(SCLERP_KINLIB_PREFIX)
-    list(APPEND _kinlib_hints "${SCLERP_KINLIB_PREFIX}")
-  elseif(EXISTS "/home/terry/gd/install/kinlib")
-    list(APPEND _kinlib_hints "/home/terry/gd/install/kinlib")
-  endif()
-
-  find_package(kinlib CONFIG QUIET HINTS ${_kinlib_hints})
-  if(NOT kinlib_FOUND)
-    message(FATAL_ERROR "kinlib not found. Set SCLERP_KINLIB_PREFIX to your kinlib install prefix.")
-  endif()
-
-  add_executable(sclerp_collision_kinlib_compat_test
-    tests/kinlib_compat_test.cpp
+if(SCLERP_BUILD_BENCHMARKS)
+  add_executable(sclerp_collision_benchmark
+    bench/collision_benchmark.cpp
   )
-  target_link_libraries(sclerp_collision_kinlib_compat_test
-    PRIVATE
-      sclerp_collision
-      kinlib::kinlib
-  )
-  target_compile_features(sclerp_collision_kinlib_compat_test PRIVATE cxx_std_17)
-
-  add_test(NAME sclerp_collision_kinlib_compat_test COMMAND sclerp_collision_kinlib_compat_test)
+  target_link_libraries(sclerp_collision_benchmark PRIVATE sclerp_collision)
+  target_compile_features(sclerp_collision_benchmark PRIVATE cxx_std_17)
 endif()

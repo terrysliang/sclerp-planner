@@ -16,10 +16,10 @@ struct CollisionMotionPlanOptions {
 sclerp::core::MotionPlanResult planMotionSclerpWithCollision(
     const sclerp::core::KinematicsSolver& solver,
     const sclerp::core::MotionPlanRequest& req,
-    std::vector<std::shared_ptr<ObstacleBase>>& link_meshes,
+    std::vector<std::shared_ptr<FclObject>>& link_meshes,
     const std::vector<sclerp::core::Mat4>& mesh_offset_transforms,
-    const std::vector<std::shared_ptr<ObstacleBase>>& obstacles,
-    const std::shared_ptr<ObstacleBase>& grasped_object,
+    const std::vector<std::shared_ptr<FclObject>>& obstacles,
+    const std::shared_ptr<FclObject>& grasped_object,
     const CollisionMotionPlanOptions& opt = {});
 
 }  // namespace sclerp::collision

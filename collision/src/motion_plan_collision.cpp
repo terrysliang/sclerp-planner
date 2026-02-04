@@ -76,10 +76,10 @@ private:
 MotionPlanResult planMotionSclerpWithCollision(
     const KinematicsSolver& solver,
     const MotionPlanRequest& req,
-    std::vector<std::shared_ptr<ObstacleBase>>& link_meshes,
+    std::vector<std::shared_ptr<FclObject>>& link_meshes,
     const std::vector<Mat4>& mesh_offset_transforms,
-    const std::vector<std::shared_ptr<ObstacleBase>>& obstacles,
-    const std::shared_ptr<ObstacleBase>& grasped_object,
+    const std::vector<std::shared_ptr<FclObject>>& obstacles,
+    const std::shared_ptr<FclObject>& grasped_object,
     const CollisionMotionPlanOptions& opt) {
   MotionPlanResult out;
 
@@ -281,10 +281,32 @@ MotionPlanResult planMotionSclerpWithCollision(
         return out;
       }
 
+      bool penetration = false;
+      for (const auto& c : contacts.contacts) {
+        if (c.distance < 0.0) {
+          penetration = true;
+          break;
+        }
+      }
+      if (penetration) {
+        if (shouldLog(LogLevel::Warn)) {
+          log(LogLevel::Warn, "planMotionSclerpWithCollision: penetration detected, reducing step size");
+        }
+        const double max_val = joint_delta.cwiseAbs().maxCoeff();
+        if (max_val <= opt.motion.joint_delta_min) {
+          log(LogLevel::Warn, "planMotionSclerpWithCollision: penetration recovery failed");
+          out.status = Status::Failure;
+          out.iters = iters;
+          return out;
+        }
+        step_size /= 10.0;
+        continue;
+      }
+
       Eigen::VectorXd adjusted;
       st = adjustJoints(opt.collision_dt,
-                        contacts,
                         opt.safe_dist,
+                        contacts,
                         q,
                         q_next,
                         &adjusted);

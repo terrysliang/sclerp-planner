@@ -20,8 +20,8 @@ sclerp::core::Status adjustJoints(
 
 sclerp::core::Status adjustJoints(
     double h,
-    const ContactSet& contacts,
     double safe_dist,
+    const ContactSet& contacts,
     const Eigen::VectorXd& current_joint_values,
     const Eigen::VectorXd& next_joint_values,
     Eigen::VectorXd* adjusted_joint_values);
