@@ -1,4 +1,4 @@
-#include "sclerp/collision/collision_utils.hpp"
+#include "sclerp/collision/collision.hpp"
 
 #include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/so3.hpp"
@@ -307,7 +307,7 @@ Status getContactJacobian(int link_index,
   return Status::Success;
 }
 
-Status getCollisionInfo(
+static Status computeContactArrays(
     const std::vector<std::shared_ptr<FclObject>>& link_cylinders,
     const std::vector<std::shared_ptr<FclObject>>& obstacles,
     const std::shared_ptr<FclObject>& grasped_object,
@@ -319,15 +319,15 @@ Status getCollisionInfo(
     std::vector<double>* dist_array,
     std::vector<Eigen::MatrixXd>* contact_points_array,
     std::vector<Eigen::MatrixXd>* j_contact_array) {
-  if (!validOut(contact_normal_array, "getCollisionInfo: null contact_normal_array")) return Status::InvalidParameter;
-  if (!validOut(dist_array, "getCollisionInfo: null dist_array")) return Status::InvalidParameter;
-  if (!validOut(contact_points_array, "getCollisionInfo: null contact_points_array")) return Status::InvalidParameter;
-  if (!validOut(j_contact_array, "getCollisionInfo: null j_contact_array")) return Status::InvalidParameter;
+  if (!validOut(contact_normal_array, "computeContacts: null contact_normal_array")) return Status::InvalidParameter;
+  if (!validOut(dist_array, "computeContacts: null dist_array")) return Status::InvalidParameter;
+  if (!validOut(contact_points_array, "computeContacts: null contact_points_array")) return Status::InvalidParameter;
+  if (!validOut(j_contact_array, "computeContacts: null j_contact_array")) return Status::InvalidParameter;
 
   const int grasped_obj_con = grasped_object ? 1 : 0;
   const int total_links = dof - num_links_ignore;
   if (total_links <= 0) {
-    log(LogLevel::Error, "getCollisionInfo: invalid total_links");
+    log(LogLevel::Error, "computeContacts: invalid total_links");
     return Status::InvalidParameter;
   }
 
@@ -341,15 +341,19 @@ Status getCollisionInfo(
   DistanceQueryCache query_cache;
 
   for (const auto& obstacle : obstacles) {
+    if (!obstacle) {
+      log(LogLevel::Error, "computeContacts: obstacle is null");
+      return Status::InvalidParameter;
+    }
     for (int itr_index = 1; itr_index <= total_links; ++itr_index) {
       const int num_link = num_links_ignore + itr_index;
       if (num_link < 0 || static_cast<size_t>(num_link) >= link_cylinders.size()) {
-        log(LogLevel::Error, "getCollisionInfo: link cylinder index out of range");
+        log(LogLevel::Error, "computeContacts: link cylinder index out of range");
         return Status::InvalidParameter;
       }
       const auto& current_cylinder = link_cylinders[num_link];
       if (!current_cylinder) {
-        log(LogLevel::Error, "getCollisionInfo: link cylinder is null");
+        log(LogLevel::Error, "computeContacts: link cylinder is null");
         return Status::Failure;
       }
 
@@ -362,7 +366,7 @@ Status getCollisionInfo(
                                        &cp_cylinder,
                                        &query_cache);
       if (!ok(st)) {
-        log(LogLevel::Error, "getCollisionInfo: collision check failed (environment)");
+        log(LogLevel::Error, "computeContacts: collision check failed (environment)");
         return st;
       }
 
@@ -377,6 +381,10 @@ Status getCollisionInfo(
 
   if (grasped_object) {
     for (const auto& obstacle : obstacles) {
+      if (!obstacle) {
+        log(LogLevel::Error, "computeContacts: obstacle is null");
+        return Status::InvalidParameter;
+      }
       Vec3 cp_obstacle, cp_grasped;
       double min_d = 0.0;
       const Status st = checkCollision(*obstacle,
@@ -386,7 +394,7 @@ Status getCollisionInfo(
                                        &cp_grasped,
                                        &query_cache);
       if (!ok(st)) {
-        log(LogLevel::Error, "getCollisionInfo: collision check failed (grasped object)");
+        log(LogLevel::Error, "computeContacts: collision check failed (grasped object)");
         return st;
       }
 
@@ -405,12 +413,12 @@ Status getCollisionInfo(
     for (int itr_index = 1; itr_index <= total_links; ++itr_index) {
       const int moving_link_index = num_links_ignore + itr_index;
       if (moving_link_index < 0 || static_cast<size_t>(moving_link_index) >= link_cylinders.size()) {
-        log(LogLevel::Error, "getCollisionInfo: moving link index out of range");
+        log(LogLevel::Error, "computeContacts: moving link index out of range");
         return Status::InvalidParameter;
       }
       const auto& link1 = link_cylinders[moving_link_index];
       if (!link1) {
-        log(LogLevel::Error, "getCollisionInfo: self-collision moving link is null");
+        log(LogLevel::Error, "computeContacts: self-collision moving link is null");
         return Status::Failure;
       }
 
@@ -418,7 +426,7 @@ Status getCollisionInfo(
       for (int obs_itr = 0; obs_itr <= total_links; ++obs_itr) {
         const int obstacle_link_index = (obs_itr == 0) ? 0 : (num_links_ignore + obs_itr);
         if (obstacle_link_index < 0 || static_cast<size_t>(obstacle_link_index) >= link_cylinders.size()) {
-          log(LogLevel::Error, "getCollisionInfo: obstacle link index out of range");
+          log(LogLevel::Error, "computeContacts: obstacle link index out of range");
           return Status::InvalidParameter;
         }
 
@@ -432,7 +440,7 @@ Status getCollisionInfo(
 
         const auto& link2 = link_cylinders[obstacle_link_index];
         if (!link2) {
-          log(LogLevel::Error, "getCollisionInfo: self-collision obstacle link is null");
+          log(LogLevel::Error, "computeContacts: self-collision obstacle link is null");
           return Status::Failure;
         }
         Vec3 cp_link1, cp_link2;
@@ -444,7 +452,7 @@ Status getCollisionInfo(
                                          &cp_link1,
                                          &query_cache);
         if (!ok(st)) {
-          log(LogLevel::Error, "getCollisionInfo: self-collision check failed");
+          log(LogLevel::Error, "computeContacts: self-collision check failed");
           return st;
         }
 
@@ -468,7 +476,7 @@ Status getCollisionInfo(
       : i + num_links_ignore;
     const Status st = getContactJacobian(idx, contact_point, spatial_jacobian, &(*j_contact_array)[i]);
     if (!ok(st)) {
-      log(LogLevel::Error, "getCollisionInfo: getContactJacobian failed");
+      log(LogLevel::Error, "computeContacts: getContactJacobian failed");
       return st;
     }
   }
@@ -476,57 +484,76 @@ Status getCollisionInfo(
   return Status::Success;
 }
 
-Status computeContacts(
-    const std::vector<std::shared_ptr<FclObject>>& link_cylinders,
-    const std::vector<std::shared_ptr<FclObject>>& obstacles,
-    const std::shared_ptr<FclObject>& grasped_object,
-    const Eigen::MatrixXd& spatial_jacobian,
-    const CollisionQueryOptions& opt,
-    ContactSet* out) {
+Status computeContacts(const CollisionContext& ctx,
+                       const CollisionQueryOptions& opt,
+                       ContactSet* out) {
   if (!validOut(out, "computeContacts: null output")) return Status::InvalidParameter;
+
+  if (ctx.spatial_jacobian.rows() != 6) {
+    log(LogLevel::Error, "computeContacts: spatial_jacobian must have 6 rows");
+    return Status::InvalidParameter;
+  }
+  const int dof = static_cast<int>(ctx.spatial_jacobian.cols());
+  if (dof <= 0) {
+    log(LogLevel::Error, "computeContacts: invalid dof");
+    return Status::InvalidParameter;
+  }
+  if (ctx.link_cylinders.size() < static_cast<size_t>(dof + 1)) {
+    log(LogLevel::Error, "computeContacts: insufficient link objects for dof");
+    return Status::InvalidParameter;
+  }
 
   Eigen::MatrixXd contact_normal_array;
   std::vector<double> dist_array;
   std::vector<Eigen::MatrixXd> contact_points_array;
   std::vector<Eigen::MatrixXd> j_contact_array;
 
-  const Status st = getCollisionInfo(
-      link_cylinders,
-      obstacles,
-      grasped_object,
-      spatial_jacobian,
+  const Status st = computeContactArrays(
+      ctx.link_cylinders,
+      ctx.obstacles,
+      ctx.grasped_object,
+      ctx.spatial_jacobian,
       opt.check_self_collision,
       opt.num_links_ignore,
-      opt.dof,
+      dof,
       &contact_normal_array,
       &dist_array,
       &contact_points_array,
       &j_contact_array);
   if (!ok(st)) return st;
 
-  const int grasped_obj_con = grasped_object ? 1 : 0;
-  const int total_links = opt.dof - opt.num_links_ignore;
+  const bool has_grasped = static_cast<bool>(ctx.grasped_object);
+  const int grasped_obj_con = has_grasped ? 1 : 0;
+  const int total_links = dof - opt.num_links_ignore;
   const int total_contacts = total_links + grasped_obj_con;
+  if (total_links <= 0 || total_contacts < 0) {
+    log(LogLevel::Error, "computeContacts: invalid contact dimensions");
+    return Status::InvalidParameter;
+  }
 
   out->contacts.clear();
-  out->contacts.reserve(dist_array.size());
+  out->contacts.reserve(static_cast<size_t>(total_contacts));
 
   for (int i = 0; i < total_contacts; ++i) {
     Contact contact;
-    contact.distance = dist_array[i];
-    contact.normal = contact_normal_array.block<3,1>(0, i);
+    if (static_cast<size_t>(i) < dist_array.size()) {
+      contact.distance = dist_array[static_cast<size_t>(i)];
+    }
+    if (i < contact_normal_array.cols()) {
+      contact.normal = contact_normal_array.block<3,1>(0, i);
+    }
 
     if (static_cast<size_t>(i) < contact_points_array.size() &&
-        contact_points_array[i].cols() == 2) {
-      contact.point_obj = contact_points_array[i].col(0);
-      contact.point_link = contact_points_array[i].col(1);
+        contact_points_array[static_cast<size_t>(i)].cols() == 2) {
+      contact.point_obj = contact_points_array[static_cast<size_t>(i)].col(0);
+      contact.point_link = contact_points_array[static_cast<size_t>(i)].col(1);
     }
 
     if (static_cast<size_t>(i) < j_contact_array.size()) {
-      contact.J_contact = j_contact_array[i];
+      contact.J_contact = j_contact_array[static_cast<size_t>(i)];
     }
 
-    if (grasped_object && i == total_links) {
+    if (has_grasped && i == total_links) {
       contact.is_grasped = true;
       contact.link_index = -1;
     } else {

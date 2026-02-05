@@ -132,7 +132,6 @@ NearestOnScrewResult nearestPoseOnScrew(const Transform& g_i,
     res.g_near = g_i;
     res.d_pos = positionDistance(res.g_near, g_t);
     res.d_rot = rotationDistance(res.g_near, g_t);
-    log(LogLevel::Error, "nearestPoseOnScrew: screwParameters failed");
     return res;
   }
 

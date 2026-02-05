@@ -3,6 +3,7 @@
 #include "sclerp/core/common/logger.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -12,6 +13,7 @@ namespace sclerp::collision {
 using sclerp::core::Status;
 using sclerp::core::LogLevel;
 using sclerp::core::log;
+using LemkeTable = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
 Status lemkeSolve(const Eigen::VectorXd& q,
                   const Eigen::MatrixXd& M,
@@ -47,11 +49,15 @@ Status lemkeSolve(const Eigen::VectorXd& q,
   if (dim > 30) {
     log(LogLevel::Warn, "lemkeSolve: large problem size, max iterations capped");
   }
-  const int maxloop = 1 << max_shift;
+  constexpr int kMaxLoopHardCap = 100000;
+  const int maxloop = std::min(1 << max_shift, kMaxLoopHardCap);
+  if ((1 << max_shift) > kMaxLoopHardCap) {
+    log(LogLevel::Warn, "lemkeSolve: max iterations hard-capped for stability");
+  }
   int loop = 0;
   int ray = 0;
 
-  Eigen::MatrixXd table(dim, 2 * dim + 2);
+  LemkeTable table(dim, 2 * dim + 2);
   table.leftCols(dim) = Eigen::MatrixXd::Identity(dim, dim);
   table.middleCols(dim, dim) = -M;
   table.col(2 * dim) = -Eigen::VectorXd::Ones(dim);
@@ -73,9 +79,10 @@ Status lemkeSolve(const Eigen::VectorXd& q,
     ++loop;
 
     const Eigen::VectorXd pivcol = table.col(enter);
+    const double piv_eps = 1e-12 * std::max(1.0, pivcol.cwiseAbs().maxCoeff());
 
     std::vector<bool> postest(dim);
-    for (int i = 0; i < dim; ++i) postest[i] = (pivcol(i) <= 0.0);
+    for (int i = 0; i < dim; ++i) postest[i] = (pivcol(i) <= piv_eps);
     if (std::accumulate(postest.begin(), postest.end(), 0) == dim) {
       ray = 1;
       break;
@@ -88,6 +95,11 @@ Status lemkeSolve(const Eigen::VectorXd& q,
     }
     ratio.minCoeff(&pivrow);
 
+    const double pivot_value = table(pivrow, enter);
+    if (!std::isfinite(pivot_value) || std::abs(pivot_value) <= piv_eps) {
+      log(LogLevel::Error, "lemkeSolve: unstable pivot");
+      return Status::Failure;
+    }
     table.row(pivrow) /= table(pivrow, enter);
     for (int i = 0; i < dim; ++i) {
       if (i == pivrow) continue;
@@ -96,7 +108,7 @@ Status lemkeSolve(const Eigen::VectorXd& q,
 
     const int drop = index[pivrow];
     index[pivrow] = enter;
-    enter = (drop > dim) ? (drop - dim) : (drop + dim);
+    enter = (drop >= dim) ? (drop - dim) : (drop + dim);
   }
 
   Eigen::VectorXd solution = Eigen::VectorXd::Zero(2 * dim + 1);

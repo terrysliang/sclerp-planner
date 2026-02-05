@@ -5,19 +5,20 @@
 #include <Eigen/Dense>
 
 #include "sclerp/collision/avoidance.hpp"
-#include "sclerp/collision/collision_utils.hpp"
+#include "sclerp/collision/collision.hpp"
 #include "sclerp/collision/types.hpp"
 #include "sclerp/core/common/status.hpp"
 #include "sclerp/core/math/types.hpp"
 
 using sclerp::collision::ContactSet;
 using sclerp::collision::CollisionQueryOptions;
+using sclerp::collision::CollisionContext;
+using sclerp::collision::CollisionAvoidanceOptions;
 using sclerp::collision::FclObject;
 using sclerp::collision::adjustJoints;
 using sclerp::collision::getContactJacobian;
 using sclerp::collision::createSphere;
 using sclerp::collision::createPlane;
-using sclerp::collision::getCollisionInfo;
 using sclerp::collision::computeContacts;
 using sclerp::collision::checkCollision;
 using sclerp::core::Status;
@@ -29,19 +30,13 @@ static bool near(double a, double b, double tol) {
   return std::abs(a - b) <= tol;
 }
 
-static bool vecNear(const Vec3& a, const Vec3& b, double tol) {
-  return (a - b).norm() <= tol;
-}
-
 static bool matNear(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b, double tol) {
   if (a.rows() != b.rows() || a.cols() != b.cols()) return false;
   if (a.size() == 0) return true;
   return (a - b).cwiseAbs().maxCoeff() <= tol;
 }
 
-static void test_compute_contacts_consistency() {
-  constexpr double tol = 1e-9;
-
+static void test_compute_contacts_basic_scene() {
   // Build a minimal scene: base + 2 links, 1 obstacle.
   std::vector<std::shared_ptr<FclObject>> link_cylinders;
   link_cylinders.reserve(3);
@@ -75,52 +70,26 @@ static void test_compute_contacts_consistency() {
                       9, 10,
                       11, 12;
 
-  Eigen::MatrixXd contact_normal_array;
-  std::vector<double> dist_array;
-  std::vector<Eigen::MatrixXd> contact_points_array;
-  std::vector<Eigen::MatrixXd> j_contact_array;
-
-  const Status st = getCollisionInfo(
-      link_cylinders,
-      obstacles,
-      grasped_object,
-      spatial_jacobian,
-      /*check_self_collision=*/true,
-      /*num_links_ignore=*/0,
-      dof,
-      &contact_normal_array,
-      &dist_array,
-      &contact_points_array,
-      &j_contact_array);
-  assert(ok(st));
-
   CollisionQueryOptions opt;
   opt.check_self_collision = true;
   opt.num_links_ignore = 0;
-  opt.dof = dof;
+
+  const CollisionContext ctx{
+      link_cylinders,
+      obstacles,
+      grasped_object,
+      spatial_jacobian};
 
   ContactSet contacts;
-  assert(ok(computeContacts(link_cylinders,
-                            obstacles,
-                            grasped_object,
-                            spatial_jacobian,
-                            opt,
-                            &contacts)));
+  assert(ok(computeContacts(ctx, opt, &contacts)));
 
-  assert(dist_array.size() == contacts.contacts.size());
-  for (size_t i = 0; i < dist_array.size(); ++i) {
-    const auto& c = contacts.contacts[i];
-    assert(near(dist_array[i], c.distance, tol));
-    assert(vecNear(contact_normal_array.block<3,1>(0, static_cast<int>(i)), c.normal, tol));
-
-    if (contact_points_array[i].rows() == 3 && contact_points_array[i].cols() == 2) {
-      assert(vecNear(contact_points_array[i].col(0), c.point_obj, tol));
-      assert(vecNear(contact_points_array[i].col(1), c.point_link, tol));
-    }
-
-    if (i < j_contact_array.size()) {
-      assert(matNear(j_contact_array[i], c.J_contact, tol));
-    }
+  assert(contacts.contacts.size() == static_cast<size_t>(dof));
+  for (const auto& contact : contacts.contacts) {
+    assert(std::isfinite(contact.distance));
+    assert(contact.J_contact.rows() == 6);
+    assert(contact.J_contact.cols() == dof);
+    assert(contact.link_index >= 0);
+    assert(!contact.is_grasped);
   }
 }
 
@@ -199,26 +168,20 @@ static void test_self_collision_last_link_special_case() {
   Eigen::MatrixXd spatial_jacobian = Eigen::MatrixXd::Zero(6, 3);
   spatial_jacobian.block<3,3>(0, 0).setIdentity();
 
-  Eigen::MatrixXd contact_normal_array;
-  std::vector<double> dist_array;
-  std::vector<Eigen::MatrixXd> contact_points_array;
-  std::vector<Eigen::MatrixXd> j_contact_array;
+  CollisionQueryOptions opt;
+  opt.check_self_collision = true;
+  opt.num_links_ignore = 1;
 
-  const Status st = getCollisionInfo(
+  const CollisionContext ctx{
       link_cylinders,
       obstacles,
       grasped_object,
-      spatial_jacobian,
-      /*check_self_collision=*/true,
-      /*num_links_ignore=*/1,
-      /*dof=*/3,
-      &contact_normal_array,
-      &dist_array,
-      &contact_points_array,
-      &j_contact_array);
+      spatial_jacobian};
+  ContactSet contacts;
+  const Status st = computeContacts(ctx, opt, &contacts);
   assert(ok(st));
-  assert(dist_array.size() == 2);
-  assert(dist_array[1] < 0.0);
+  assert(contacts.contacts.size() == 2);
+  assert(contacts.contacts[1].distance < 0.0);
 }
 
 static void test_adjust_joints_passthrough_when_safe() {
@@ -231,20 +194,91 @@ static void test_adjust_joints_passthrough_when_safe() {
   Eigen::Vector2d q_current(0.0, 0.0);
   Eigen::Vector2d q_next(0.1, -0.2);
   Eigen::VectorXd adjusted;
-  assert(ok(adjustJoints(/*h=*/0.001,
-                         /*safe_dist=*/0.01,
-                         contacts,
-                         q_current,
-                         q_next,
-                         &adjusted)));
+  CollisionAvoidanceOptions opt;
+  opt.dt = 0.001;
+  opt.safe_dist = 0.01;
+  assert(ok(adjustJoints(opt, contacts, q_current, q_next, &adjusted)));
   assert((adjusted - q_next).norm() <= 1e-12);
 }
 
+static void test_adjust_joints_invalid_options_rejected() {
+  Eigen::Vector2d q_current(0.0, 0.0);
+  Eigen::Vector2d q_next(0.1, -0.2);
+
+  ContactSet contacts;
+  contacts.contacts.resize(1);
+  contacts.contacts[0].distance = 0.5;
+  contacts.contacts[0].normal = Vec3(1.0, 0.0, 0.0);
+  contacts.contacts[0].J_contact = Eigen::MatrixXd::Zero(6, 2);
+
+  CollisionAvoidanceOptions opt;
+  opt.dt = 0.0;
+  opt.safe_dist = 0.01;
+  Eigen::VectorXd adjusted;
+  assert(adjustJoints(opt, contacts, q_current, q_next, &adjusted) == Status::InvalidParameter);
+
+  opt.dt = 0.001;
+  opt.safe_dist = -0.1;
+  assert(adjustJoints(opt, contacts, q_current, q_next, &adjusted) == Status::InvalidParameter);
+}
+
+static void test_check_collision_overload_equivalence() {
+  std::shared_ptr<FclObject> sphere_a;
+  std::shared_ptr<FclObject> sphere_b;
+  assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.0), Mat3::Identity(), &sphere_a)));
+  assert(ok(createSphere(0.1, Vec3(0.5, 0.0, 0.0), Mat3::Identity(), &sphere_b)));
+
+  double d0 = 0.0;
+  Vec3 p0_a = Vec3::Zero();
+  Vec3 p0_b = Vec3::Zero();
+  assert(ok(checkCollision(*sphere_a, *sphere_b, &d0, &p0_a, &p0_b)));
+
+  sclerp::collision::DistanceQueryCache cache;
+  double d1 = 0.0;
+  Vec3 p1_a = Vec3::Zero();
+  Vec3 p1_b = Vec3::Zero();
+  assert(ok(checkCollision(*sphere_a, *sphere_b, &d1, &p1_a, &p1_b, &cache)));
+
+  assert(std::abs(d0 - d1) <= 1e-12);
+  assert((p0_a - p1_a).norm() <= 1e-12);
+  assert((p0_b - p1_b).norm() <= 1e-12);
+}
+
+static void test_null_obstacle_rejected() {
+  std::vector<std::shared_ptr<FclObject>> link_cylinders;
+  std::shared_ptr<FclObject> base;
+  std::shared_ptr<FclObject> link1;
+  assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.0), Mat3::Identity(), &base)));
+  assert(ok(createSphere(0.1, Vec3(0.3, 0.0, 0.0), Mat3::Identity(), &link1)));
+  link_cylinders.push_back(base);
+  link_cylinders.push_back(link1);
+
+  std::vector<std::shared_ptr<FclObject>> obstacles;
+  obstacles.push_back(nullptr);
+
+  Eigen::MatrixXd spatial_jacobian = Eigen::MatrixXd::Zero(6, 1);
+  const std::shared_ptr<FclObject> grasped_object = nullptr;
+  CollisionQueryOptions opt;
+  opt.check_self_collision = false;
+  opt.num_links_ignore = 0;
+  const CollisionContext ctx{
+      link_cylinders,
+      obstacles,
+      grasped_object,
+      spatial_jacobian};
+  ContactSet contacts;
+  const Status st = computeContacts(ctx, opt, &contacts);
+  assert(st == Status::InvalidParameter);
+}
+
 int main() {
-  test_compute_contacts_consistency();
+  test_compute_contacts_basic_scene();
   test_self_collision_last_link_special_case();
   test_contact_jacobian_structure();
   test_adjust_joints_passthrough_when_safe();
+  test_adjust_joints_invalid_options_rejected();
+  test_check_collision_overload_equivalence();
+  test_null_obstacle_rejected();
   test_plane();
   std::cout << "sclerp_collision_unit_test: PASS\n";
   return 0;

@@ -18,7 +18,7 @@ endif()
 
 add_library(sclerp_collision
   src/avoidance.cpp
-  src/collision_utils.cpp
+  src/collision.cpp
   src/motion_plan_collision.cpp
   src/lemke.cpp
 )

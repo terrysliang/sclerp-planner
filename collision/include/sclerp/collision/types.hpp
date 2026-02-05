@@ -26,7 +26,6 @@ struct ContactSet {
 struct CollisionQueryOptions {
   bool check_self_collision = false;
   int num_links_ignore = 0;
-  int dof = 0;
 };
 
 }  // namespace sclerp::collision

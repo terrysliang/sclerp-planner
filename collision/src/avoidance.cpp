@@ -10,7 +10,7 @@ using sclerp::core::Status;
 using sclerp::core::LogLevel;
 using sclerp::core::log;
 
-Status adjustJoints(
+static Status adjustJointsFromArrays(
     double h,
     const std::vector<double>& dist_array,
     const Eigen::MatrixXd& contact_normal_array,
@@ -97,14 +97,17 @@ Status adjustJoints(
 }
 
 Status adjustJoints(
-    double h,
-    double safe_dist,
+    const CollisionAvoidanceOptions& opt,
     const ContactSet& contacts,
     const Eigen::VectorXd& current_joint_values,
     const Eigen::VectorXd& next_joint_values,
     Eigen::VectorXd* adjusted_joint_values) {
   if (!adjusted_joint_values) {
     log(LogLevel::Error, "adjustJoints: null output");
+    return Status::InvalidParameter;
+  }
+  if (opt.dt <= 0.0 || opt.safe_dist <= 0.0) {
+    log(LogLevel::Error, "adjustJoints: invalid avoidance options");
     return Status::InvalidParameter;
   }
 
@@ -126,14 +129,14 @@ Status adjustJoints(
     j_contact_array.push_back(contact.J_contact);
   }
 
-  return adjustJoints(h,
-                      dist_array,
-                      contact_normal_array,
-                      safe_dist,
-                      current_joint_values,
-                      next_joint_values,
-                      j_contact_array,
-                      adjusted_joint_values);
+  return adjustJointsFromArrays(opt.dt,
+                                dist_array,
+                                contact_normal_array,
+                                opt.safe_dist,
+                                current_joint_values,
+                                next_joint_values,
+                                j_contact_array,
+                                adjusted_joint_values);
 }
 
 }  // namespace sclerp::collision

@@ -134,25 +134,15 @@ Status getContactJacobian(int link_index,
                           const Eigen::MatrixXd& spatial_jacobian,
                           Eigen::MatrixXd* contact_jacobian);
 
-Status getCollisionInfo(
-    const std::vector<std::shared_ptr<FclObject>>& link_cylinders,
-    const std::vector<std::shared_ptr<FclObject>>& obstacles,
-    const std::shared_ptr<FclObject>& grasped_object,
-    const Eigen::MatrixXd& spatial_jacobian,
-    bool check_self_collision,
-    int num_links_ignore,
-    int dof,
-    Eigen::MatrixXd* contact_normal_array,
-    std::vector<double>* dist_array,
-    std::vector<Eigen::MatrixXd>* contact_points_array,
-    std::vector<Eigen::MatrixXd>* j_contact_array);
+struct CollisionContext {
+  const std::vector<std::shared_ptr<FclObject>>& link_cylinders;
+  const std::vector<std::shared_ptr<FclObject>>& obstacles;
+  const std::shared_ptr<FclObject>& grasped_object;
+  const Eigen::MatrixXd& spatial_jacobian;
+};
 
-Status computeContacts(
-    const std::vector<std::shared_ptr<FclObject>>& link_cylinders,
-    const std::vector<std::shared_ptr<FclObject>>& obstacles,
-    const std::shared_ptr<FclObject>& grasped_object,
-    const Eigen::MatrixXd& spatial_jacobian,
-    const CollisionQueryOptions& opt,
-    ContactSet* out);
+Status computeContacts(const CollisionContext& ctx,
+                       const CollisionQueryOptions& opt,
+                       ContactSet* out);
 
 }  // namespace sclerp::collision

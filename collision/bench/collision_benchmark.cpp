@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "sclerp/collision/collision_utils.hpp"
+#include "sclerp/collision/collision.hpp"
 #include "sclerp/core/common/status.hpp"
 
 using sclerp::collision::FclObject;

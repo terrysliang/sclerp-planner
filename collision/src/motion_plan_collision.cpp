@@ -1,4 +1,4 @@
-#include "sclerp/collision/motion_plan.hpp"
+#include "sclerp/collision/motion_plan_collision.hpp"
 #include "sclerp/collision/avoidance.hpp"
 
 #include "sclerp/core/common/logger.hpp"
@@ -76,12 +76,13 @@ private:
 MotionPlanResult planMotionSclerpWithCollision(
     const KinematicsSolver& solver,
     const MotionPlanRequest& req,
-    std::vector<std::shared_ptr<FclObject>>& link_meshes,
-    const std::vector<Mat4>& mesh_offset_transforms,
-    const std::vector<std::shared_ptr<FclObject>>& obstacles,
-    const std::shared_ptr<FclObject>& grasped_object,
+    CollisionScene& scene,
     const CollisionMotionPlanOptions& opt) {
   MotionPlanResult out;
+  auto& link_meshes = scene.link_meshes;
+  const auto& mesh_offset_transforms = scene.mesh_offset_transforms;
+  const auto& obstacles = scene.obstacles;
+  const auto& grasped_object = scene.grasped_object;
 
   const int n = solver.model().dof();
   if (n <= 0) {
@@ -99,8 +100,13 @@ MotionPlanResult planMotionSclerpWithCollision(
     out.status = Status::InvalidParameter;
     return out;
   }
-  if (opt.safe_dist <= 0.0 || opt.collision_dt <= 0.0) {
+  if (opt.avoidance.safe_dist <= 0.0 || opt.avoidance.dt <= 0.0) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: invalid collision params");
+    out.status = Status::InvalidParameter;
+    return out;
+  }
+  if (opt.query.num_links_ignore < 0 || opt.query.num_links_ignore >= n) {
+    log(LogLevel::Error, "planMotionSclerpWithCollision: invalid num_links_ignore");
     out.status = Status::InvalidParameter;
     return out;
   }
@@ -263,17 +269,14 @@ MotionPlanResult planMotionSclerpWithCollision(
         return out;
       }
 
-      CollisionQueryOptions copt;
-      copt.check_self_collision = opt.check_self_collision;
-      copt.num_links_ignore = opt.num_links_ignore;
-      copt.dof = n;
+      CollisionQueryOptions copt = opt.query;
+      const CollisionContext cctx{
+          link_meshes,
+          obstacles,
+          grasped_object,
+          spatial_jacobian};
       ContactSet contacts;
-      st = computeContacts(link_meshes,
-                           obstacles,
-                           grasped_object,
-                           spatial_jacobian,
-                           copt,
-                           &contacts);
+      st = computeContacts(cctx, copt, &contacts);
       if (!ok(st)) {
         log(LogLevel::Error, "planMotionSclerpWithCollision: computeContacts failed");
         out.status = st;
@@ -304,12 +307,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       }
 
       Eigen::VectorXd adjusted;
-      st = adjustJoints(opt.collision_dt,
-                        opt.safe_dist,
-                        contacts,
-                        q,
-                        q_next,
-                        &adjusted);
+      st = adjustJoints(opt.avoidance, contacts, q, q_next, &adjusted);
       if (!ok(st)) {
         log(LogLevel::Error, "planMotionSclerpWithCollision: adjustJoints failed");
         out.status = st;
