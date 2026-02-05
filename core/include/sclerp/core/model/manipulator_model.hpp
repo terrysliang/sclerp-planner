@@ -53,7 +53,7 @@ public:
   const std::vector<std::string>& joint_names() const { return joint_names_; }
 
   const Transform& ee_home() const { return ee_home_; }       // gst0_
-  const ScrewMatrix& S_space() const { return S_space_; }     // cached 6 x n
+  const ScrewMatrix& S_space() const { return S_space_; }     // cached 6 x n, [v; w]
 
   // Optional: per-joint reference transforms gst0_i (base -> joint frame at zero)
   Status set_joint_home_transforms(std::vector<Transform> gst0_i);
@@ -72,7 +72,7 @@ private:
   std::vector<std::string> joint_names_;
 
   Transform ee_home_{Transform::Identity()};
-  ScrewMatrix S_space_;  // 6 x n
+  ScrewMatrix S_space_;  // 6 x n, [v; w]
 
   std::optional<std::vector<Transform>> gst0_i_; // optional
 };

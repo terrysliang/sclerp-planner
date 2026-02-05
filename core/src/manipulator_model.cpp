@@ -185,22 +185,22 @@ Status ManipulatorModel::rebuild_cache(const Thresholds& thr) {
     if (!ok(st)) return st;
 
     if (j.type == JointType::Revolute) {
-      // S = [w; v], v = -w x q
+      // S = [v; w], v = -w x q
       const Vec3 w = j.axis;
       const Vec3 q = j.point;
       const Vec3 v = -w.cross(q);
 
       ScrewAxis S;
-      S.head<3>() = w;
-      S.tail<3>() = v;
+      S.head<3>() = v;
+      S.tail<3>() = w;
       S_space_.col(i) = S;
     } else if (j.type == JointType::Prismatic) {
-      // S = [0; v]
+      // S = [v; 0]
       const Vec3 v = j.axis;
 
       ScrewAxis S;
-      S.head<3>().setZero();
-      S.tail<3>() = v;
+      S.head<3>() = v;
+      S.tail<3>().setZero();
       S_space_.col(i) = S;
 
       // prismatic doesn't use point

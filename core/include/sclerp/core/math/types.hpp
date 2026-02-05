@@ -10,7 +10,7 @@ using Mat4 = Eigen::Matrix4d;
 using Quat = Eigen::Quaterniond;
 
 using Transform = Eigen::Isometry3d;                 // internal canonical SE(3)
-using Twist = Eigen::Matrix<double, 6, 1>;           // [omega; v]
+using Twist = Eigen::Matrix<double, 6, 1>;           // [v; w] (linear; angular)
 using AdjointMatrix = Eigen::Matrix<double, 6, 6>;
 using ScrewAxis = Twist;
 using ScrewMatrix = Eigen::Matrix<double, 6, Eigen::Dynamic>;

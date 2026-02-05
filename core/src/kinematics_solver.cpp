@@ -120,23 +120,17 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
     return Status::InvalidParameter;
   }
 
-  const ScrewMatrix& S_space = model_.S_space(); // [w; v] columns
+  const ScrewMatrix& S_space = model_.S_space(); // [v; w] columns
 
   if (n > 0) {
-    Eigen::Matrix<double, 6, 1> twist;
-    twist.head<3>() = S_space.block<3,1>(3, 0);  // v
-    twist.tail<3>() = S_space.block<3,1>(0, 0);  // w
-    J_space.col(0) = twist;
+    J_space.col(0) = S_space.col(0);
   }
 
-  Eigen::Matrix<double, 6, 1> twist;
   Transform prod = Transform::Identity();  // Π_{k<i} exp(joint_k)
   for (int i = 1; i < n; ++i) {
     prod = prod * jointExp(model_.joint(i - 1), q(i - 1));
     const AdjointMatrix Ad = adjointVW(prod);
-    twist.head<3>() = S_space.block<3,1>(3, i);  // v
-    twist.tail<3>() = S_space.block<3,1>(0, i);  // w
-    J_space.col(i) = Ad * twist;
+    J_space.col(i) = Ad * S_space.col(i);
   }
 
   return Status::Success;

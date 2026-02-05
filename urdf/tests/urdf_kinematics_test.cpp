@@ -132,11 +132,7 @@ static void test_jacobian_fd() {
 
     const Transform Trel = gn * g.inverse();
     const sclerp::core::Twist xi = (sclerp::core::logSE3(Trel) / eps).eval();
-    Eigen::Matrix<double, 6, 1> xi_vk;
-    xi_vk.head<3>() = xi.tail<3>();
-    xi_vk.tail<3>() = xi.head<3>();
-
-    const double err = (xi_vk - J.col(i)).norm();
+    const double err = (xi - J.col(i)).norm();
     // Loose tolerance: depends on eps + log/exp numeric conditioning
     assert(err < 1e-4);
   }

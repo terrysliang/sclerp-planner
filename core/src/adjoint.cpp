@@ -10,7 +10,7 @@ AdjointMatrix adjoint(const Transform& T) {
   AdjointMatrix Ad = AdjointMatrix::Zero();
   Ad.block<3,3>(0,0) = R;
   Ad.block<3,3>(3,3) = R;
-  Ad.block<3,3>(3,0) = hat3(p) * R;  // [p]x R
+  Ad.block<3,3>(0,3) = hat3(p) * R;  // ordering: [v; w]
   return Ad;
 }
 
@@ -19,4 +19,3 @@ Eigen::Matrix<double, 6, 6> getAdjoint(const Mat4& g) {
 }
 
 }  // namespace sclerp::core
-

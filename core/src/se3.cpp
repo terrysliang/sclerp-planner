@@ -10,8 +10,8 @@ static inline double clamp(double x, double lo, double hi) {
 }
 
 Mat4 hat6(const Twist& xi) {
-  const Vec3 w = xi.head<3>();
-  const Vec3 v = xi.tail<3>();
+  const Vec3 v = xi.head<3>();
+  const Vec3 w = xi.tail<3>();
 
   Mat4 X = Mat4::Zero();
   X.block<3,3>(0,0) = hat3(w);
@@ -21,14 +21,14 @@ Mat4 hat6(const Twist& xi) {
 
 Twist vee6(const Mat4& Xi) {
   Twist xi;
-  xi.head<3>() = vee3(Xi.block<3,3>(0,0));
-  xi.tail<3>() = Xi.block<3,1>(0,3);
+  xi.head<3>() = Xi.block<3,1>(0,3);
+  xi.tail<3>() = vee3(Xi.block<3,3>(0,0));
   return xi;
 }
 
 Transform expSE3(const Twist& xi) {
-  const Vec3 w = xi.head<3>();
-  const Vec3 v = xi.tail<3>();
+  const Vec3 v = xi.head<3>();
+  const Vec3 w = xi.tail<3>();
   const double theta = w.norm();
 
   Mat3 R = Mat3::Identity();
@@ -80,8 +80,8 @@ Twist logSE3(const Transform& T) {
     V = Mat3::Identity() + B * W + C * W2;
   }
 
-  xi.head<3>() = w;
-  xi.tail<3>() = V.inverse() * p;
+  xi.head<3>() = V.inverse() * p;
+  xi.tail<3>() = w;
   return xi;
 }
 
@@ -100,4 +100,3 @@ Mat4 getTransformationInv(const Mat4& g) {
 }
 
 }  // namespace sclerp::core
-

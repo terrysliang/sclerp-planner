@@ -7,7 +7,7 @@ namespace sclerp::core {
 Transform transformFromMatrix4(const Mat4& T) {
   // Expect a valid homogeneous transform. We tolerate small numeric drift.
   if (std::abs(T(3, 3) - 1.0) > 1e-9) {
-    log(LogLevel::Error, "transformFromMatrix4: T(3,3) != 1");
+    log(LogLevel::Warn, "transformFromMatrix4: non-homogeneous T(3,3); continuing");
   }
 
   Transform out = Transform::Identity();

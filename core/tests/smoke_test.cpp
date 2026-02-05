@@ -85,13 +85,10 @@ static void test_fk_and_jacobian() {
 
     Transform Trel = gn * g.inverse();
     const sclerp::core::Twist xi = (sclerp::core::logSE3(Trel) / eps).eval();
-    Eigen::Matrix<double, 6, 1> xi_vk;
-    xi_vk.head<3>() = xi.tail<3>();
-    xi_vk.tail<3>() = xi.head<3>();
 
     // Compare twist
     const Eigen::VectorXd Ji = J.col(i);
-    const double err = (xi_vk - Ji).norm();
+    const double err = (xi - Ji).norm();
     assert(err < 1e-4); // loose but robust
   }
 }
