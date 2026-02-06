@@ -297,7 +297,7 @@ int main(int argc, char** argv) {
       const DualQuat dq_i(g_i);
       const Status st = baseline
         ? rmrcIncrementBaseline(model, dq_i, dq_f, q, &dq_base)
-        : solver.rmrcIncrement(dq_i, dq_f, q, &dq, &rmrc_ws);
+        : solver.rmrcIncrement(dq_i, dq_f, q, &dq, sclerp::core::RmrcOptions{}, &rmrc_ws);
       if (!ok(st)) {
         std::cerr << "rmrcIncrement failed\n";
         std::exit(1);

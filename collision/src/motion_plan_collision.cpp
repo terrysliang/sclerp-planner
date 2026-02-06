@@ -195,7 +195,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       }
     }
 
-    Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq, &rmrc_ws);
+    Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq, opt.motion.rmrc, &rmrc_ws);
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerpWithCollision: rmrcIncrement failed");
       out.status = st;

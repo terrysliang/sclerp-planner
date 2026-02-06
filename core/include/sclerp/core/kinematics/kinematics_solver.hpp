@@ -6,9 +6,22 @@
 #include "sclerp/core/model/manipulator_model.hpp"
 #include "sclerp/core/dual_quat/dual_quat.hpp"
 
+#include <cstdint>
 #include <vector>
 
 namespace sclerp::core {
+
+enum class RmrcDamping : std::uint8_t {
+  None = 0,
+  Constant = 1,
+  Adaptive = 2
+};
+
+struct RmrcOptions {
+  RmrcDamping damping{RmrcDamping::Adaptive};
+  double lambda{5e-2};     // constant damping or max damping for adaptive
+  double sigma_min{2e-2};  // adaptive threshold for smallest singular value
+};
 
 class SCLERP_CORE_API KinematicsSolver {
 public:
@@ -29,10 +42,6 @@ public:
                          Eigen::Ref<Eigen::MatrixXd> J_space) const;
 
   // Dual-quat RMRC
-  Status rmrcIncrement(const DualQuat& dq_i,
-                       const DualQuat& dq_f,
-                       const Eigen::VectorXd& q_current,
-                       Eigen::VectorXd* dq) const;
   struct RmrcWorkspace {
     Eigen::MatrixXd s_jac;  // 6 x n
   };
@@ -40,6 +49,7 @@ public:
                        const DualQuat& dq_f,
                        const Eigen::VectorXd& q_current,
                        Eigen::VectorXd* dq,
+                       const RmrcOptions& opt,
                        RmrcWorkspace* ws) const;
 
 private:

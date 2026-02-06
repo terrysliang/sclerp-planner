@@ -114,20 +114,6 @@ Status checkCollision(const FclObject& obj1,
                       Vec3* contact_point_obj1,
                       Vec3* contact_point_obj2);
 
-struct DistanceQueryCache {
-  fcl::DistanceRequestd request{};
-  fcl::DistanceResultd result{};
-
-  DistanceQueryCache();
-};
-
-Status checkCollision(const FclObject& obj1,
-                      const FclObject& obj2,
-                      double* min_dist,
-                      Vec3* contact_point_obj1,
-                      Vec3* contact_point_obj2,
-                      DistanceQueryCache* cache);
-
 // link_index is 0-based joint index; columns [0..link_index] are used.
 Status getContactJacobian(int link_index,
                           const Vec3& contact_point,

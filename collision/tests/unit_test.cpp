@@ -222,28 +222,6 @@ static void test_adjust_joints_invalid_options_rejected() {
   assert(adjustJoints(opt, contacts, q_current, q_next, &adjusted) == Status::InvalidParameter);
 }
 
-static void test_check_collision_overload_equivalence() {
-  std::shared_ptr<FclObject> sphere_a;
-  std::shared_ptr<FclObject> sphere_b;
-  assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.0), Mat3::Identity(), &sphere_a)));
-  assert(ok(createSphere(0.1, Vec3(0.5, 0.0, 0.0), Mat3::Identity(), &sphere_b)));
-
-  double d0 = 0.0;
-  Vec3 p0_a = Vec3::Zero();
-  Vec3 p0_b = Vec3::Zero();
-  assert(ok(checkCollision(*sphere_a, *sphere_b, &d0, &p0_a, &p0_b)));
-
-  sclerp::collision::DistanceQueryCache cache;
-  double d1 = 0.0;
-  Vec3 p1_a = Vec3::Zero();
-  Vec3 p1_b = Vec3::Zero();
-  assert(ok(checkCollision(*sphere_a, *sphere_b, &d1, &p1_a, &p1_b, &cache)));
-
-  assert(std::abs(d0 - d1) <= 1e-12);
-  assert((p0_a - p1_a).norm() <= 1e-12);
-  assert((p0_b - p1_b).norm() <= 1e-12);
-}
-
 static void test_null_obstacle_rejected() {
   std::vector<std::shared_ptr<FclObject>> link_cylinders;
   std::shared_ptr<FclObject> base;
@@ -277,7 +255,6 @@ int main() {
   test_contact_jacobian_structure();
   test_adjust_joints_passthrough_when_safe();
   test_adjust_joints_invalid_options_rejected();
-  test_check_collision_overload_equivalence();
   test_null_obstacle_rejected();
   test_plane();
   std::cout << "sclerp_collision_unit_test: PASS\n";

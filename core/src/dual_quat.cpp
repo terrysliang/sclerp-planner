@@ -196,16 +196,18 @@ DualQuat DualQuat::operator*(const DualQuat& rhs) const {
 
 DualQuat DualQuat::pow(double t) const {
   // dual-quat power (raiseToPower).
-  Eigen::Vector4d real_part = quatVec(qr_);
-  Eigen::Vector4d dual_part = quatVec(qd_);
+  const DualQuat dq = this->normalized();
+  Eigen::Vector4d real_part = quatVec(dq.qr_);
+  Eigen::Vector4d dual_part = quatVec(dq.qd_);
 
   double theta;
-  if (real_part(0) <= -1.0) {
+  const double w = std::max(-1.0, std::min(1.0, real_part(0)));
+  if (w <= -1.0) {
     theta = M_PI;
-  } else if (real_part(0) >= 1.0) {
+  } else if (w >= 1.0) {
     theta = 0.0;
   } else {
-    theta = 2.0 * std::acos(real_part(0));
+    theta = 2.0 * std::acos(w);
   }
 
   theta = std::fmod(theta + M_PI, 2.0 * M_PI);
@@ -214,7 +216,7 @@ DualQuat DualQuat::pow(double t) const {
   }
   theta -= M_PI;
 
-  const Transform T = this->toTransform();
+  const Transform T = dq.toTransform();
   const Vec3 p = T.translation();
 
   Eigen::Vector4d res_real_part;
@@ -262,10 +264,12 @@ DualQuat DualQuat::pow(double t) const {
 
 DualQuat DualQuat::interpolate(const DualQuat& a, const DualQuat& b, double t) {
   // dual-quat interpolation: dq_i * (dq_i*^{-1} dq_f)^t
-  const DualQuat dq_i_conj = a.conjugate();
-  DualQuat dq_rel = DualQuat::productRaw(dq_i_conj, b);
+  const DualQuat a_norm = a.normalized();
+  const DualQuat b_norm = b.normalized();
+  const DualQuat dq_i_conj = a_norm.conjugate();
+  DualQuat dq_rel = DualQuat::productRaw(dq_i_conj, b_norm);
   dq_rel = dq_rel.pow(t);
-  return DualQuat::productRaw(a, dq_rel);
+  return DualQuat::productRaw(a_norm, dq_rel);
 }
 
 double rotationDistance(const DualQuat& a, const DualQuat& b) {

@@ -164,7 +164,8 @@ LoadResult loadManipulatorModelFromString(const std::string& urdf_xml,
       return fail(Status::InvalidParameter,
                   "Joint axis near zero for joint: " + j->name);
     }
-    const Vec3 axis_space = T_base_child0.rotation() * axis_joint;
+    Vec3 axis_space = T_base_child0.rotation() * axis_joint;
+    axis_space.normalize();
 
     // Limits
     if (j->limits) {

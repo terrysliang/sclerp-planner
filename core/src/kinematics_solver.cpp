@@ -5,6 +5,8 @@
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
+#include <algorithm>
+#include <cmath>
 
 namespace sclerp::core {
 
@@ -139,14 +141,8 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
 Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
                                        const DualQuat& dq_f,
                                        const Eigen::VectorXd& q_current,
-                                       Eigen::VectorXd* dq) const {
-  return rmrcIncrement(dq_i, dq_f, q_current, dq, nullptr);
-}
-
-Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
-                                       const DualQuat& dq_f,
-                                       const Eigen::VectorXd& q_current,
                                        Eigen::VectorXd* dq,
+                                       const RmrcOptions& opt,
                                        RmrcWorkspace* ws) const {
   if (!dq) {
     log(LogLevel::Error, "rmrcIncrement: null output pointer");
@@ -157,16 +153,18 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
     return Status::InvalidParameter;
   }
 
-  // RMRC in dual-quat form.
-  const Transform g_i = dq_i.toTransform();
-  const Transform g_f = dq_f.toTransform();
+  // RMRC in dual-quat form. Normalize inputs to ensure valid quaternion algebra.
+  const DualQuat dq_i_norm = dq_i.normalized();
+  const DualQuat dq_f_norm = dq_f.normalized();
+  const Transform g_i = dq_i_norm.toTransform();
+  const Transform g_f = dq_f_norm.toTransform();
 
   Eigen::Matrix<double, 7, 1> gamma_i;
   Eigen::Matrix<double, 7, 1> gamma_f;
 
   const Vec3 p_i = g_i.translation();
   gamma_i.head<3>() = p_i;
-  const Quat q_i = dq_i.real();
+  const Quat q_i = dq_i_norm.real();
   gamma_i(3) = q_i.w();
   gamma_i(4) = q_i.x();
   gamma_i(5) = q_i.y();
@@ -174,7 +172,12 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
 
   const Vec3 p_f = g_f.translation();
   gamma_f.head<3>() = p_f;
-  const Quat q_f = dq_f.real();
+  Quat q_f = dq_f_norm.real();
+  const double q_dot = q_i.w() * q_f.w() + q_i.x() * q_f.x() + q_i.y() * q_f.y() + q_i.z() * q_f.z();
+  if (q_dot < 0.0) {
+    // Flip to keep shortest path in quaternion space (q and -q represent same rotation).
+    q_f.coeffs() *= -1.0;
+  }
   gamma_f(3) = q_f.w();
   gamma_f(4) = q_f.x();
   gamma_f(5) = q_f.y();
@@ -213,12 +216,47 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
   J2.block<3,4>(3,3) = 2.0 * J1;
 
   Eigen::Matrix<double, 6, 6> temp = s_jac * s_jac.transpose();
+  double lambda_sq = 0.0;
+  if (opt.damping == RmrcDamping::Constant) {
+    if (opt.lambda > 0.0) {
+      lambda_sq = opt.lambda * opt.lambda;
+    }
+  } else if (opt.damping == RmrcDamping::Adaptive) {
+    if (opt.lambda > 0.0 && opt.sigma_min > 0.0) {
+      Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 6, 6>> es(temp);
+      if (es.info() == Eigen::Success) {
+        const double eig_min = std::max(0.0, es.eigenvalues().minCoeff());
+        const double sigma_min = std::sqrt(eig_min);
+        const double ratio = sigma_min / opt.sigma_min;
+        if (ratio < 1.0) {
+          const double r = std::max(0.0, std::min(1.0, ratio));
+          // Smooth cubic ramp: 1 - smoothstep(r) = 1 - (3r^2 - 2r^3).
+          const double scale = 1.0 - (3.0 * r * r - 2.0 * r * r * r);
+          const double lambda = opt.lambda * scale;
+          lambda_sq = lambda * lambda;
+        }
+      } else {
+        lambda_sq = opt.lambda * opt.lambda;
+      }
+    }
+  }
+  if (lambda_sq > 0.0) {
+    temp.diagonal().array() += lambda_sq;
+  }
   Eigen::LDLT<Eigen::Matrix<double, 6, 6>> ldlt(temp);
+  if (ldlt.info() != Eigen::Success) {
+    log(LogLevel::Error, "rmrcIncrement: LDLT factorization failed");
+    return Status::Failure;
+  }
   Eigen::Matrix<double, 6, 7> X = ldlt.solve(J2);
   const Eigen::Matrix<double, 7, 1> dgamma = (gamma_f - gamma_i);
   const Eigen::Matrix<double, 6, 1> y = X * dgamma;
 
   dq->noalias() = s_jac.transpose() * y;
+  if (!dq->allFinite()) {
+    log(LogLevel::Error, "rmrcIncrement: non-finite joint increments");
+    return Status::Failure;
+  }
   return Status::Success;
 }
 

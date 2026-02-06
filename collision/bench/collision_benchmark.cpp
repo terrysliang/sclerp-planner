@@ -8,7 +8,6 @@
 #include "sclerp/core/common/status.hpp"
 
 using sclerp::collision::FclObject;
-using sclerp::collision::DistanceQueryCache;
 using sclerp::collision::createSphere;
 using sclerp::collision::checkCollision;
 using sclerp::core::Status;
@@ -72,21 +71,15 @@ int main(int argc, char** argv) {
 
   static volatile double sink = 0.0;
 
-  auto run_checks = [&](bool cached) {
+  auto run_checks = [&]() {
     double acc = 0.0;
-    DistanceQueryCache cache;
     for (int it = 0; it < iters; ++it) {
       for (const auto& obs : obs_objs) {
         for (const auto& link : link_objs) {
           double min_d = 0.0;
           Vec3 p1 = Vec3::Zero();
           Vec3 p2 = Vec3::Zero();
-          Status st = Status::Failure;
-          if (cached) {
-            st = checkCollision(*obs, *link, &min_d, &p1, &p2, &cache);
-          } else {
-            st = checkCollision(*obs, *link, &min_d, &p1, &p2);
-          }
+          Status st = checkCollision(*obs, *link, &min_d, &p1, &p2);
           if (!ok(st)) {
             std::cerr << "checkCollision failed\n";
             std::exit(1);
@@ -99,16 +92,14 @@ int main(int argc, char** argv) {
   };
 
   // Warm-up
-  run_checks(false);
+  run_checks();
 
-  const double baseline_ms = benchMs([&]() { run_checks(false); });
-  const double cached_ms = benchMs([&]() { run_checks(true); });
+  const double baseline_ms = benchMs([&]() { run_checks(); });
 
   std::cout << "sclerp_collision_benchmark\n";
   std::cout << "links=" << links
             << " obstacles=" << obstacles
             << " iters=" << iters << "\n";
   std::cout << "baseline_ms=" << baseline_ms << "\n";
-  std::cout << "cached_ms=" << cached_ms << "\n";
   return 0;
 }

@@ -12,12 +12,13 @@ using sclerp::core::log;
 
 static Status adjustJointsFromArrays(
     double h,
+    double safe_dist,
     const std::vector<double>& dist_array,
     const Eigen::MatrixXd& contact_normal_array,
-    double safe_dist,
     const Eigen::VectorXd& current_joint_values,
     const Eigen::VectorXd& next_joint_values,
     const std::vector<Eigen::MatrixXd>& j_contact_array,
+    const sclerp::core::SvdPseudoInverseOptions& svd_opt,
     Eigen::VectorXd* adjusted_joint_values) {
   if (!adjusted_joint_values) {
     log(LogLevel::Error, "adjustJoints: null output");
@@ -62,7 +63,7 @@ static Status adjustJointsFromArrays(
       log(LogLevel::Error, "adjustJoints: contact Jacobian size mismatch");
       return Status::InvalidParameter;
     }
-    j_pinv.push_back(sclerp::core::svdPseudoInverse(jac));
+    j_pinv.push_back(sclerp::core::svdPseudoInverse(jac, svd_opt));
   }
 
   for (int n = 0; n < nc; ++n) {
@@ -130,12 +131,13 @@ Status adjustJoints(
   }
 
   return adjustJointsFromArrays(opt.dt,
+                                opt.safe_dist,
                                 dist_array,
                                 contact_normal_array,
-                                opt.safe_dist,
                                 current_joint_values,
                                 next_joint_values,
                                 j_contact_array,
+                                opt.svd,
                                 adjusted_joint_values);
 }
 

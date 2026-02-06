@@ -153,7 +153,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
       }
     }
 
-    Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq, &rmrc_ws);
+    Status st = solver.rmrcIncrement(dq_current, dq_next, q, &dq, opt.rmrc, &rmrc_ws);
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerp: rmrcIncrement failed");
       out.status = st;

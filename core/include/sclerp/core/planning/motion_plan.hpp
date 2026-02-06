@@ -25,6 +25,9 @@ struct MotionPlanOptions {
   // If joint deltas shrink below this, treat as joint-limit failure
   double joint_delta_min = 1e-4;
 
+  // RMRC damping configuration
+  RmrcOptions rmrc{};
+
   Thresholds thr = kDefaultThresholds;
 };
 

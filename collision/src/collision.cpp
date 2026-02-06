@@ -240,40 +240,27 @@ Status checkCollision(const FclObject& obj1,
                       double* min_dist,
                       Vec3* contact_point_obj1,
                       Vec3* contact_point_obj2) {
-  return checkCollision(obj1, obj2, min_dist, contact_point_obj1, contact_point_obj2, nullptr);
-}
-
-DistanceQueryCache::DistanceQueryCache() {
-  request.enable_nearest_points = true;
-  request.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
-  request.distance_tolerance = 1e-6;
-}
-
-Status checkCollision(const FclObject& obj1,
-                      const FclObject& obj2,
-                      double* min_dist,
-                      Vec3* contact_point_obj1,
-                      Vec3* contact_point_obj2,
-                      DistanceQueryCache* cache) {
   if (!validOut(min_dist, "checkCollision: null min_dist")) return Status::InvalidParameter;
   if (!validOut(contact_point_obj1, "checkCollision: null contact_point_obj1")) return Status::InvalidParameter;
   if (!validOut(contact_point_obj2, "checkCollision: null contact_point_obj2")) return Status::InvalidParameter;
 
-  DistanceQueryCache local_cache;
-  DistanceQueryCache* active = cache ? cache : &local_cache;
-  active->result = fcl::DistanceResultd();
+  fcl::DistanceRequestd request;
+  request.enable_nearest_points = true;
+  request.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
+  request.distance_tolerance = 1e-6;
+  fcl::DistanceResultd result;
 
   *min_dist = fcl::distance(&obj1.collisionObject(),
                             &obj2.collisionObject(),
-                            active->request,
-                            active->result);
+                            request,
+                            result);
   if (std::isnan(*min_dist)) {
     log(LogLevel::Error, "checkCollision: min_dist is NaN");
     return Status::Failure;
   }
 
-  *contact_point_obj1 = active->result.nearest_points[0];
-  *contact_point_obj2 = active->result.nearest_points[1];
+  *contact_point_obj1 = result.nearest_points[0];
+  *contact_point_obj2 = result.nearest_points[1];
 
   if (*min_dist < 0.0) {
     log(LogLevel::Warn, "checkCollision: penetration detected");
@@ -338,8 +325,6 @@ static Status computeContactArrays(
   j_contact_array->assign(total_contacts,
                           Eigen::MatrixXd::Zero(6, spatial_jacobian.cols()));
   std::vector<bool> has_contact(static_cast<size_t>(total_contacts), false);
-  DistanceQueryCache query_cache;
-
   for (const auto& obstacle : obstacles) {
     if (!obstacle) {
       log(LogLevel::Error, "computeContacts: obstacle is null");
@@ -363,8 +348,7 @@ static Status computeContactArrays(
                                        *current_cylinder,
                                        &min_d,
                                        &cp_obj,
-                                       &cp_cylinder,
-                                       &query_cache);
+                                       &cp_cylinder);
       if (!ok(st)) {
         log(LogLevel::Error, "computeContacts: collision check failed (environment)");
         return st;
@@ -391,8 +375,7 @@ static Status computeContactArrays(
                                        *grasped_object,
                                        &min_d,
                                        &cp_obstacle,
-                                       &cp_grasped,
-                                       &query_cache);
+                                       &cp_grasped);
       if (!ok(st)) {
         log(LogLevel::Error, "computeContacts: collision check failed (grasped object)");
         return st;
@@ -449,8 +432,7 @@ static Status computeContactArrays(
                                          *link1,
                                          &min_d,
                                          &cp_link2,
-                                         &cp_link1,
-                                         &query_cache);
+                                         &cp_link1);
         if (!ok(st)) {
           log(LogLevel::Error, "computeContacts: self-collision check failed");
           return st;
