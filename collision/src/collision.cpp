@@ -220,14 +220,14 @@ Status updateLinkMeshTransforms(std::vector<std::shared_ptr<FclObject>>& link_me
     log(LogLevel::Error, "updateLinkMeshTransforms: size mismatch");
     return Status::InvalidParameter;
   }
-  if (mesh_offset_transforms.size() + 1 != g_intermediate.size()) {
+  if (mesh_offset_transforms.size() != g_intermediate.size()) {
     log(LogLevel::Error, "updateLinkMeshTransforms: mesh offset size mismatch");
     return Status::InvalidParameter;
   }
 
-  for (size_t i = 1; i < link_meshes.size(); ++i) {
+  for (size_t i = 0; i < link_meshes.size(); ++i) {
     if (!link_meshes[i]) continue;
-    const Mat4 T_world_to_mesh = g_intermediate[i] * mesh_offset_transforms[i - 1];
+    const Mat4 T_world_to_mesh = g_intermediate[i] * mesh_offset_transforms[i];
     const Vec3 position = T_world_to_mesh.block<3,1>(0, 3);
     const Mat3 rotation = T_world_to_mesh.block<3,3>(0, 0);
     link_meshes[i]->setTransform(position, rotation);

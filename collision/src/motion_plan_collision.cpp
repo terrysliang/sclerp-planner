@@ -224,14 +224,20 @@ MotionPlanResult planMotionSclerpWithCollision(
         return out;
       }
 
-      const std::size_t expected_transforms = fk_intermediate.size() + 1;
+      const bool fk_has_tool = (fk_intermediate.size() == static_cast<std::size_t>(n + 2));
+      const std::size_t expected_transforms = fk_intermediate.size();
       if (expected_transforms != link_meshes.size()) {
+        if (fk_has_tool && link_meshes.size() == static_cast<std::size_t>(n + 1)) {
+          log(LogLevel::Warn,
+              "planMotionSclerpWithCollision: tool frame detected but no tool mesh provided; "
+              "add a tool mesh to link_meshes or set tip_link to the flange.");
+        }
         log(LogLevel::Error, "planMotionSclerpWithCollision: link mesh count mismatch");
         out.status = Status::InvalidParameter;
         out.iters = iters;
         return out;
       }
-      if (mesh_offset_transforms.size() + 1 != expected_transforms) {
+      if (mesh_offset_transforms.size() != expected_transforms) {
         log(LogLevel::Error, "planMotionSclerpWithCollision: mesh offset size mismatch");
         out.status = Status::InvalidParameter;
         out.iters = iters;
@@ -239,8 +245,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       }
 
       g_intermediate.clear();
-      g_intermediate.reserve(fk_intermediate.size() + 1);
-      g_intermediate.push_back(Mat4::Identity());
+      g_intermediate.reserve(fk_intermediate.size());
       for (const auto& T : fk_intermediate) {
         g_intermediate.push_back(matrix4FromTransform(T));
       }

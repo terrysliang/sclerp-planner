@@ -53,13 +53,14 @@ Status KinematicsSolver::forwardKinematics(const Eigen::VectorXd& q,
     return Status::InvalidParameter;
   }
 
+  const Transform& base = model_.base_offset();
   const int n = model_.dof();
   Transform prod = Transform::Identity();
   for (int i = 0; i < n; ++i) {
     prod = prod * jointExp(model_.joint(i), q(i));
   }
 
-  *g_base_tool = prod * model_.ee_home();
+  *g_base_tool = base * prod * model_.ee_home();
   return Status::Success;
 }
 
@@ -75,21 +76,30 @@ Status KinematicsSolver::forwardKinematicsAll(const Eigen::VectorXd& q,
   }
 
   intermediate_transforms->clear();
-  intermediate_transforms->reserve(static_cast<std::size_t>(model_.dof()) + 1);
+  const std::size_t reserve_count =
+      static_cast<std::size_t>(model_.dof()) + 1 + (model_.has_tool_frame() ? 1 : 0);
+  intermediate_transforms->reserve(reserve_count);
 
+  const Transform& base = model_.base_offset();
   const int n = model_.dof();
   Transform prod = Transform::Identity();
+
+  // Base link transform (may be identity).
+  intermediate_transforms->push_back(base);
+
   for (int i = 0; i < n; ++i) {
     prod = prod * jointExp(model_.joint(i), q(i));
 
     // each JointSpec has joint_tip_home (fixed home transform for that joint's tip frame)
     // so g_i(q) = (Π exp(Sk qk)) * M_i
-    const Transform g_tip = prod * model_.joint(i).joint_tip_home;
+    const Transform g_tip = base * prod * model_.joint(i).joint_tip_home;
     intermediate_transforms->push_back(g_tip);
   }
 
-  // Append EE as last element (like many FK-all APIs)
-  intermediate_transforms->push_back(prod * model_.ee_home());
+  if (model_.has_tool_frame()) {
+    // Append EE as last element when a tool frame exists.
+    intermediate_transforms->push_back(base * prod * model_.ee_home());
+  }
   return Status::Success;
 }
 
@@ -135,6 +145,10 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
     J_space.col(i) = Ad * S_space.col(i);
   }
 
+  if (model_.has_base_offset()) {
+    const AdjointMatrix Ad_base = adjointVW(model_.base_offset());
+    J_space = Ad_base * J_space;
+  }
   return Status::Success;
 }
 

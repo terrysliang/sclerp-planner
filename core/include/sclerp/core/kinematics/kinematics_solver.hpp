@@ -32,7 +32,8 @@ public:
   // FK end-effector
   Status forwardKinematics(const Eigen::VectorXd& q, Transform* g_base_tool) const;
 
-  // FK intermediate transforms (per joint tip); EE is last element if available
+  // FK transforms including base (index 0) and per-joint tips;
+  // EE is appended when a tool frame exists.
   Status forwardKinematicsAll(const Eigen::VectorXd& q,
                               std::vector<Transform>* intermediate_transforms) const;
 

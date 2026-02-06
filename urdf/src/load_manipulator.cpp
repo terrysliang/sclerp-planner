@@ -60,6 +60,95 @@ static bool supportedJointType(decltype(::urdf::Joint().type) t) {
          t == ::urdf::Joint::FIXED;
 }
 
+static bool isMovableJointType(decltype(::urdf::Joint().type) t) {
+  return t == ::urdf::Joint::REVOLUTE ||
+         t == ::urdf::Joint::CONTINUOUS ||
+         t == ::urdf::Joint::PRISMATIC;
+}
+
+static bool isIdentityTransform(const Transform& T, double tol = 1e-9) {
+  return T.isApprox(Transform::Identity(), tol);
+}
+
+static Status computeBaseOffset(const ::urdf::ModelInterfaceSharedPtr& model,
+                                const std::string& base_link,
+                                Transform* out_offset,
+                                bool* has_offset,
+                                std::string* err) {
+  if (!out_offset || !has_offset) {
+    return Status::InvalidParameter;
+  }
+
+  ::urdf::LinkConstSharedPtr base = model->getLink(base_link);
+  if (!base) {
+    if (err) *err = "base_link not found: " + base_link;
+    return Status::InvalidParameter;
+  }
+
+  Transform T_world_to_base = Transform::Identity();
+  ::urdf::LinkConstSharedPtr cur = base;
+  while (cur && cur->parent_joint) {
+    ::urdf::JointConstSharedPtr pj = cur->parent_joint;
+    if (pj->type != ::urdf::Joint::FIXED) {
+      if (err) {
+        *err = "base_link has non-fixed parent joint: " + pj->name +
+               " (only fixed joints above base_link are supported)";
+      }
+      return Status::InvalidParameter;
+    }
+
+    const Transform T_parent_child = poseToEigen(pj->parent_to_joint_origin_transform);
+    T_world_to_base = T_parent_child * T_world_to_base;
+
+    ::urdf::LinkConstSharedPtr pl = cur->getParent();
+    if (!pl) {
+      if (pj->parent_link_name.empty()) {
+        if (err) *err = "Cannot find parent link for joint: " + pj->name;
+        return Status::InvalidParameter;
+      }
+      pl = model->getLink(pj->parent_link_name);
+      if (!pl) {
+        if (err) *err = "Parent link not found: " + pj->parent_link_name;
+        return Status::InvalidParameter;
+      }
+    }
+    cur = pl;
+  }
+
+  *out_offset = T_world_to_base;
+  *has_offset = !isIdentityTransform(T_world_to_base);
+  return Status::Success;
+}
+
+static bool hasToolFrameFromChain(
+    const std::vector<::urdf::JointConstSharedPtr>& joints_base_to_tip,
+    const LoadOptions& opt,
+    bool* has_fixed_after_movable,
+    bool* has_tool_offset) {
+  if (has_fixed_after_movable) *has_fixed_after_movable = false;
+  if (has_tool_offset) *has_tool_offset = false;
+
+  const bool tool_offset_specified = !isIdentityTransform(opt.tool_offset);
+  if (has_tool_offset) *has_tool_offset = tool_offset_specified;
+  if (tool_offset_specified || !opt.collapse_fixed_joints) {
+    return tool_offset_specified;
+  }
+
+  int last_movable = -1;
+  for (std::size_t i = 0; i < joints_base_to_tip.size(); ++i) {
+    if (isMovableJointType(joints_base_to_tip[i]->type)) {
+      last_movable = static_cast<int>(i);
+    }
+  }
+
+  const bool fixed_after =
+      (last_movable < 0)
+          ? !joints_base_to_tip.empty()
+          : static_cast<std::size_t>(last_movable + 1) < joints_base_to_tip.size();
+  if (has_fixed_after_movable) *has_fixed_after_movable = fixed_after;
+  return fixed_after;
+}
+
 LoadResult loadManipulatorModelFromString(const std::string& urdf_xml,
                                           const LoadOptions& opt) {
   if (opt.base_link.empty() || opt.tip_link.empty()) {
@@ -117,8 +206,38 @@ LoadResult loadManipulatorModelFromString(const std::string& urdf_xml,
                 "base_link not reached from tip_link. Check base_link and tip_link.");
   }
 
+  Transform base_offset = Transform::Identity();
+  bool has_base_offset = false;
+  {
+    std::string base_err;
+    const Status st_base = computeBaseOffset(model, opt.base_link, &base_offset, &has_base_offset, &base_err);
+    if (!ok(st_base)) {
+      return fail(st_base, base_err);
+    }
+  }
+  if (has_base_offset && shouldLog(LogLevel::Warn)) {
+    log(LogLevel::Warn,
+        "URDF: base_link has a fixed parent transform; base_offset will be applied to FK.");
+  }
+
   // Reverse to get base -> tip order
   std::reverse(joints_tip_to_base.begin(), joints_tip_to_base.end());
+  bool has_fixed_after_movable = false;
+  bool has_tool_offset = false;
+  const bool has_tool_frame =
+      hasToolFrameFromChain(joints_tip_to_base, opt, &has_fixed_after_movable, &has_tool_offset);
+  if (has_tool_frame && shouldLog(LogLevel::Warn)) {
+    if (has_tool_offset) {
+      log(LogLevel::Warn,
+          "URDF: tool_offset specified; tool frame will be included in FK-all outputs.");
+    } else if (has_fixed_after_movable) {
+      log(LogLevel::Warn,
+          "URDF: fixed joints detected after last movable joint; tool frame will be included in FK-all outputs.");
+    } else {
+      log(LogLevel::Warn,
+          "URDF: tool frame detected; tool frame will be included in FK-all outputs.");
+    }
+  }
 
   // Build ManipulatorModel joints (movable only), but always propagate transforms (fixed included).
   std::vector<JointSpec> joints;
@@ -236,6 +355,8 @@ LoadResult loadManipulatorModelFromString(const std::string& urdf_xml,
   if (!ok(st)) {
     return fail(st, "ManipulatorModel init failed");
   }
+  out_model.set_has_tool_frame(has_tool_frame);
+  out_model.set_base_offset(base_offset);
 
   LoadResult res;
   res.status = Status::Success;

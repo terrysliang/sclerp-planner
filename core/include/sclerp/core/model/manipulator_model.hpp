@@ -53,6 +53,14 @@ public:
   const std::vector<std::string>& joint_names() const { return joint_names_; }
 
   const Transform& ee_home() const { return ee_home_; }       // gst0_
+  bool has_tool_frame() const { return has_tool_frame_; }
+  void set_has_tool_frame(bool has_tool_frame) { has_tool_frame_ = has_tool_frame; }
+  const Transform& base_offset() const { return base_offset_; }
+  bool has_base_offset() const { return has_base_offset_; }
+  void set_base_offset(const Transform& base_offset) {
+    base_offset_ = base_offset;
+    has_base_offset_ = !base_offset_.isApprox(Transform::Identity(), 1e-12);
+  }
   const ScrewMatrix& S_space() const { return S_space_; }     // cached 6 x n, [v; w]
 
   // Optional: per-joint reference transforms gst0_i (base -> joint frame at zero)
@@ -72,6 +80,9 @@ private:
   std::vector<std::string> joint_names_;
 
   Transform ee_home_{Transform::Identity()};
+  bool has_tool_frame_{false};
+  Transform base_offset_{Transform::Identity()};  // world -> base_link (fixed)
+  bool has_base_offset_{false};
   ScrewMatrix S_space_;  // 6 x n, [v; w]
 
   std::optional<std::vector<Transform>> gst0_i_; // optional

@@ -106,6 +106,7 @@ Status buildLinkMeshes(const std::vector<std::string>& stl_files,
 
 Status updateLinkMeshTransforms(std::vector<std::shared_ptr<FclObject>>& link_meshes,
                                 const std::vector<Mat4>& g_intermediate,
+                                // mesh_offset_transforms aligns 1:1 with link_meshes/g_intermediate (index 0 is base).
                                 const std::vector<Mat4>& mesh_offset_transforms);
 
 Status checkCollision(const FclObject& obj1,

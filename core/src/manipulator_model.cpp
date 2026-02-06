@@ -36,6 +36,9 @@ Status ManipulatorModel::init(std::vector<JointSpec> joints,
                               const Thresholds& thr) {
   joints_ = std::move(joints);
   ee_home_ = ee_home;
+  has_tool_frame_ = false;
+  base_offset_ = Transform::Identity();
+  has_base_offset_ = false;
 
   // Build joint names
   joint_names_.clear();
