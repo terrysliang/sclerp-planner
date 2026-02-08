@@ -6,6 +6,8 @@
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+#include <algorithm>
+#include <cmath>
 
 namespace sclerp::collision {
 
@@ -246,6 +248,10 @@ Status checkCollision(const FclObject& obj1,
 
   fcl::DistanceRequestd request;
   request.enable_nearest_points = true;
+  // Keep signed distance disabled here: FCL's signed-distance path with
+  // GST_INDEP can assert on some mesh/contact cases. We recover penetration
+  // depth robustly below via an explicit collision query.
+  request.enable_signed_distance = false;
   request.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
   request.distance_tolerance = 1e-6;
   fcl::DistanceResultd result;
@@ -263,6 +269,38 @@ Status checkCollision(const FclObject& obj1,
   *contact_point_obj2 = result.nearest_points[1];
 
   if (*min_dist < 0.0) {
+    fcl::CollisionRequestd collision_request;
+    collision_request.enable_contact = true;
+    collision_request.num_max_contacts = 16;
+    collision_request.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
+    fcl::CollisionResultd collision_result;
+    fcl::collide(&obj1.collisionObject(),
+                 &obj2.collisionObject(),
+                 collision_request,
+                 collision_result);
+
+    double max_depth = 0.0;
+    const std::size_t num_contacts = collision_result.numContacts();
+    for (std::size_t i = 0; i < num_contacts; ++i) {
+      const auto& contact = collision_result.getContact(i);
+      if (std::isfinite(contact.penetration_depth)) {
+        max_depth = std::max(max_depth, contact.penetration_depth);
+      }
+    }
+
+    if (max_depth > 0.0 && std::isfinite(max_depth)) {
+      *min_dist = -max_depth;
+      if (num_contacts > 0) {
+        const auto& contact = collision_result.getContact(0);
+        const Vec3 normal = contact.normal;
+        const Vec3 point = contact.pos;
+        *contact_point_obj1 = point - 0.5 * max_depth * normal;
+        *contact_point_obj2 = point + 0.5 * max_depth * normal;
+      }
+    } else if (*min_dist < -1e-6) {
+      // Fallback guard against implementation-defined signed distance (often -1).
+      *min_dist = -1e-6;
+    }
     log(LogLevel::Warn, "checkCollision: penetration detected");
   }
 

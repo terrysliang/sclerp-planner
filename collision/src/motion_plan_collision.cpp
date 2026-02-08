@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 namespace sclerp::collision {
@@ -176,6 +177,7 @@ MotionPlanResult planMotionSclerpWithCollision(
   Eigen::MatrixXd spatial_jacobian;
   std::vector<Transform> fk_intermediate;
   std::vector<Mat4> g_intermediate;
+  ContactSet contacts;
 
   while (!((pos_dist < opt.motion.pos_tol) && (rot_dist < opt.motion.rot_tol)) &&
          (iters < opt.motion.max_iters)) {
@@ -210,106 +212,102 @@ MotionPlanResult planMotionSclerpWithCollision(
       return out;
     }
 
+    // Collision avoidance linearization at the current configuration.
+    fk_intermediate.clear();
+    const Status st_fk_all = solver.forwardKinematicsAll(q, &fk_intermediate);
+    if (!ok(st_fk_all)) {
+      log(LogLevel::Error, "planMotionSclerpWithCollision: forwardKinematicsAll failed");
+      out.status = st_fk_all;
+      out.iters = iters;
+      return out;
+    }
+
+    const bool fk_has_tool = (fk_intermediate.size() == static_cast<std::size_t>(n + 2));
+    const std::size_t expected_transforms = fk_intermediate.size();
+    if (expected_transforms != link_meshes.size()) {
+      if (fk_has_tool && link_meshes.size() == static_cast<std::size_t>(n + 1)) {
+        log(LogLevel::Warn,
+            "planMotionSclerpWithCollision: tool frame detected but no tool mesh provided; "
+            "add a tool mesh to link_meshes or set tip_link to the flange.");
+      }
+      log(LogLevel::Error, "planMotionSclerpWithCollision: link mesh count mismatch");
+      out.status = Status::InvalidParameter;
+      out.iters = iters;
+      return out;
+    }
+    if (mesh_offset_transforms.size() != expected_transforms) {
+      log(LogLevel::Error, "planMotionSclerpWithCollision: mesh offset size mismatch");
+      out.status = Status::InvalidParameter;
+      out.iters = iters;
+      return out;
+    }
+
+    g_intermediate.clear();
+    g_intermediate.reserve(fk_intermediate.size());
+    for (const auto& T : fk_intermediate) {
+      g_intermediate.push_back(matrix4FromTransform(T));
+    }
+
+    st = updateLinkMeshTransforms(link_meshes,
+                                  g_intermediate,
+                                  mesh_offset_transforms);
+    if (!ok(st)) {
+      log(LogLevel::Error, "planMotionSclerpWithCollision: updateLinkMeshTransforms failed");
+      out.status = st;
+      out.iters = iters;
+      return out;
+    }
+
+    if (grasped_object) {
+      const Mat4& g_tool = g_intermediate.back();
+      grasped_object->setTransform(g_tool.block<3,1>(0, 3), g_tool.block<3,3>(0, 0));
+    }
+
+    spatial_jacobian.resize(6, n);
+    st = solver.spatialJacobian(q, spatial_jacobian);
+    if (!ok(st)) {
+      log(LogLevel::Error, "planMotionSclerpWithCollision: spatialJacobian failed");
+      out.status = st;
+      out.iters = iters;
+      return out;
+    }
+
+    CollisionQueryOptions copt = opt.query;
+    const CollisionContext cctx{
+        link_meshes,
+        obstacles,
+        grasped_object,
+        spatial_jacobian};
+    contacts.contacts.clear();
+    st = computeContacts(cctx, copt, &contacts);
+    if (!ok(st)) {
+      log(LogLevel::Error, "planMotionSclerpWithCollision: computeContacts failed");
+      out.status = st;
+      out.iters = iters;
+      return out;
+    }
+    if (shouldLog(LogLevel::Debug)) {
+      double min_contact_dist = std::numeric_limits<double>::infinity();
+      int penetration_count = 0;
+      for (const auto& contact : contacts.contacts) {
+        min_contact_dist = std::min(min_contact_dist, contact.distance);
+        if (contact.distance < 0.0) {
+          ++penetration_count;
+        }
+      }
+      std::ostringstream oss;
+      oss << "planMotionSclerpWithCollision: iter=" << iters
+          << ", contacts=" << contacts.contacts.size()
+          << ", penetration_contacts=" << penetration_count
+          << ", min_contact_dist=" << min_contact_dist
+          << ", step_size_init=" << step_size;
+      log(LogLevel::Debug, oss.str());
+    }
+
+    int retry_count = 0;
     while (true) {
       joint_delta = dq * step_size;
       q_next = q + joint_delta;
-
-      // Collision avoidance adjustment
-      fk_intermediate.clear();
-      const Status st_fk_all = solver.forwardKinematicsAll(q_next, &fk_intermediate);
-      if (!ok(st_fk_all)) {
-        log(LogLevel::Error, "planMotionSclerpWithCollision: forwardKinematicsAll failed");
-        out.status = st_fk_all;
-        out.iters = iters;
-        return out;
-      }
-
-      const bool fk_has_tool = (fk_intermediate.size() == static_cast<std::size_t>(n + 2));
-      const std::size_t expected_transforms = fk_intermediate.size();
-      if (expected_transforms != link_meshes.size()) {
-        if (fk_has_tool && link_meshes.size() == static_cast<std::size_t>(n + 1)) {
-          log(LogLevel::Warn,
-              "planMotionSclerpWithCollision: tool frame detected but no tool mesh provided; "
-              "add a tool mesh to link_meshes or set tip_link to the flange.");
-        }
-        log(LogLevel::Error, "planMotionSclerpWithCollision: link mesh count mismatch");
-        out.status = Status::InvalidParameter;
-        out.iters = iters;
-        return out;
-      }
-      if (mesh_offset_transforms.size() != expected_transforms) {
-        log(LogLevel::Error, "planMotionSclerpWithCollision: mesh offset size mismatch");
-        out.status = Status::InvalidParameter;
-        out.iters = iters;
-        return out;
-      }
-
-      g_intermediate.clear();
-      g_intermediate.reserve(fk_intermediate.size());
-      for (const auto& T : fk_intermediate) {
-        g_intermediate.push_back(matrix4FromTransform(T));
-      }
-
-      st = updateLinkMeshTransforms(link_meshes,
-                                    g_intermediate,
-                                    mesh_offset_transforms);
-      if (!ok(st)) {
-        log(LogLevel::Error, "planMotionSclerpWithCollision: updateLinkMeshTransforms failed");
-        out.status = st;
-        out.iters = iters;
-        return out;
-      }
-
-      if (grasped_object) {
-        const Mat4& g_tool = g_intermediate.back();
-        grasped_object->setTransform(g_tool.block<3,1>(0, 3), g_tool.block<3,3>(0, 0));
-      }
-
-      spatial_jacobian.resize(6, n);
-      st = solver.spatialJacobian(q_next, spatial_jacobian);
-      if (!ok(st)) {
-        log(LogLevel::Error, "planMotionSclerpWithCollision: spatialJacobian failed");
-        out.status = st;
-        out.iters = iters;
-        return out;
-      }
-
-      CollisionQueryOptions copt = opt.query;
-      const CollisionContext cctx{
-          link_meshes,
-          obstacles,
-          grasped_object,
-          spatial_jacobian};
-      ContactSet contacts;
-      st = computeContacts(cctx, copt, &contacts);
-      if (!ok(st)) {
-        log(LogLevel::Error, "planMotionSclerpWithCollision: computeContacts failed");
-        out.status = st;
-        out.iters = iters;
-        return out;
-      }
-
-      bool penetration = false;
-      for (const auto& c : contacts.contacts) {
-        if (c.distance < 0.0) {
-          penetration = true;
-          break;
-        }
-      }
-      if (penetration) {
-        if (shouldLog(LogLevel::Warn)) {
-          log(LogLevel::Warn, "planMotionSclerpWithCollision: penetration detected, reducing step size");
-        }
-        const double max_val = joint_delta.cwiseAbs().maxCoeff();
-        if (max_val <= opt.motion.joint_delta_min) {
-          log(LogLevel::Warn, "planMotionSclerpWithCollision: penetration recovery failed");
-          out.status = Status::Failure;
-          out.iters = iters;
-          return out;
-        }
-        step_size /= 10.0;
-        continue;
-      }
 
       Eigen::VectorXd adjusted;
       st = adjustJoints(opt.avoidance, contacts, q, q_next, &adjusted);
@@ -320,20 +318,52 @@ MotionPlanResult planMotionSclerpWithCollision(
         return out;
       }
       q_next = adjusted;
+      const Eigen::VectorXd adjusted_delta = q_next - q;
+      const double raw_delta_norm = joint_delta.norm();
+      const double adjusted_delta_norm = adjusted_delta.norm();
+      double direction_alignment = 1.0;
+      if (raw_delta_norm > 0.0 && adjusted_delta_norm > 0.0) {
+        direction_alignment = joint_delta.dot(adjusted_delta) / (raw_delta_norm * adjusted_delta_norm);
+      }
+      if (shouldLog(LogLevel::Debug)) {
+        std::ostringstream oss;
+        oss << "planMotionSclerpWithCollision: iter=" << iters
+            << ", retry=" << retry_count
+            << ", step_size=" << step_size
+            << ", raw_step_norm=" << raw_delta_norm
+            << ", adjusted_step_norm=" << adjusted_delta_norm
+            << ", direction_alignment=" << direction_alignment;
+        if (direction_alignment < 0.0) {
+          oss << " (backward correction)";
+        }
+        log(LogLevel::Debug, oss.str());
+      }
 
       if (solver.model().within_limits(q_next, /*tol=*/0.0)) {
         break;
       }
 
-      const double max_val = joint_delta.cwiseAbs().maxCoeff();
-      if (max_val <= opt.motion.joint_delta_min) {
+      const double max_adjusted = adjusted_delta.cwiseAbs().maxCoeff();
+      const double max_raw = joint_delta.cwiseAbs().maxCoeff();
+      if (max_adjusted <= opt.motion.joint_delta_min || max_raw <= opt.motion.joint_delta_min) {
         log(LogLevel::Warn, "planMotionSclerpWithCollision: joint limits reached");
         out.status = Status::JointLimit;
         out.iters = iters;
         return out;
       }
 
+      if (shouldLog(LogLevel::Debug)) {
+        std::ostringstream oss;
+        oss << "planMotionSclerpWithCollision: iter=" << iters
+            << ", retry=" << retry_count
+            << ", q_next violates limits, shrinking step from " << step_size
+            << " to " << (step_size / 10.0)
+            << ", max_raw=" << max_raw
+            << ", max_adjusted=" << max_adjusted;
+        log(LogLevel::Debug, oss.str());
+      }
       step_size /= 10.0;
+      ++retry_count;
     }
 
     q = q_next;
@@ -350,6 +380,56 @@ MotionPlanResult planMotionSclerpWithCollision(
     dq_current = DualQuat(g_current);
     pos_dist = positionDistance(g_current, req.g_f);
     rot_dist = rotationDistance(dq_current, dq_f);
+  }
+
+  // Keep scene transforms consistent with the final accepted q.
+  fk_intermediate.clear();
+  const Status st_fk_all_end = solver.forwardKinematicsAll(q, &fk_intermediate);
+  if (!ok(st_fk_all_end)) {
+    log(LogLevel::Error, "planMotionSclerpWithCollision: forwardKinematicsAll failed at final sync");
+    out.status = st_fk_all_end;
+    out.iters = iters;
+    return out;
+  }
+
+  const bool fk_has_tool_end = (fk_intermediate.size() == static_cast<std::size_t>(n + 2));
+  const std::size_t expected_transforms_end = fk_intermediate.size();
+  if (expected_transforms_end != link_meshes.size()) {
+    if (fk_has_tool_end && link_meshes.size() == static_cast<std::size_t>(n + 1)) {
+      log(LogLevel::Warn,
+          "planMotionSclerpWithCollision: tool frame detected but no tool mesh provided; "
+          "add a tool mesh to link_meshes or set tip_link to the flange.");
+    }
+    log(LogLevel::Error, "planMotionSclerpWithCollision: link mesh count mismatch at final sync");
+    out.status = Status::InvalidParameter;
+    out.iters = iters;
+    return out;
+  }
+  if (mesh_offset_transforms.size() != expected_transforms_end) {
+    log(LogLevel::Error, "planMotionSclerpWithCollision: mesh offset size mismatch at final sync");
+    out.status = Status::InvalidParameter;
+    out.iters = iters;
+    return out;
+  }
+
+  g_intermediate.clear();
+  g_intermediate.reserve(fk_intermediate.size());
+  for (const auto& T : fk_intermediate) {
+    g_intermediate.push_back(matrix4FromTransform(T));
+  }
+
+  Status st_final = updateLinkMeshTransforms(link_meshes,
+                                             g_intermediate,
+                                             mesh_offset_transforms);
+  if (!ok(st_final)) {
+    log(LogLevel::Error, "planMotionSclerpWithCollision: updateLinkMeshTransforms failed at final sync");
+    out.status = st_final;
+    out.iters = iters;
+    return out;
+  }
+  if (grasped_object) {
+    const Mat4& g_tool = g_intermediate.back();
+    grasped_object->setTransform(g_tool.block<3,1>(0, 3), g_tool.block<3,3>(0, 0));
   }
 
   out.iters = iters;

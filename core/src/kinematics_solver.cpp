@@ -186,12 +186,7 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
 
   const Vec3 p_f = g_f.translation();
   gamma_f.head<3>() = p_f;
-  Quat q_f = dq_f_norm.real();
-  const double q_dot = q_i.w() * q_f.w() + q_i.x() * q_f.x() + q_i.y() * q_f.y() + q_i.z() * q_f.z();
-  if (q_dot < 0.0) {
-    // Flip to keep shortest path in quaternion space (q and -q represent same rotation).
-    q_f.coeffs() *= -1.0;
-  }
+  const Quat q_f = dq_f_norm.real();
   gamma_f(3) = q_f.w();
   gamma_f(4) = q_f.x();
   gamma_f(5) = q_f.y();

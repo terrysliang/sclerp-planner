@@ -4,6 +4,8 @@
 #include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/svd.hpp"
 
+#include <algorithm>
+
 namespace sclerp::collision {
 
 using sclerp::core::Status;
@@ -67,7 +69,8 @@ static Status adjustJointsFromArrays(
   }
 
   for (int n = 0; n < nc; ++n) {
-    q[n] = dist_array[n] - safe_dist +
+    const double clipped_dist = std::max(dist_array[n], -safe_dist);
+    q[n] = clipped_dist - safe_dist +
            h * contact_normal_array.col(n).transpose() * j_contact_array[n] * delta;
 
     for (int m = 0; m < nc; ++m) {
@@ -91,6 +94,14 @@ static Status adjustJointsFromArrays(
   Eigen::VectorXd comp_joint_values = Eigen::VectorXd::Zero(current_joint_values.size());
   for (int i = 0; i < nc; ++i) {
     comp_joint_values += j_pinv[i] * contact_normal_array.col(i) * z[i];
+  }
+  const double delta_norm = delta.norm();
+  if (delta_norm > 0.0) {
+    const double max_comp_norm = 3.0 * delta_norm;
+    const double comp_norm = comp_joint_values.norm();
+    if (comp_norm > max_comp_norm) {
+      comp_joint_values *= (max_comp_norm / comp_norm);
+    }
   }
 
   *adjusted_joint_values = next_joint_values + comp_joint_values;
