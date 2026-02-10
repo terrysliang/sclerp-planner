@@ -16,7 +16,6 @@ using sclerp::collision::CollisionContext;
 using sclerp::collision::CollisionAvoidanceOptions;
 using sclerp::collision::FclObject;
 using sclerp::collision::adjustJoints;
-using sclerp::collision::getContactJacobian;
 using sclerp::collision::createSphere;
 using sclerp::collision::createPlane;
 using sclerp::collision::computeContacts;
@@ -38,20 +37,20 @@ static bool matNear(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b, double t
 
 static void test_compute_contacts_basic_scene() {
   // Build a minimal scene: base + 2 links, 1 obstacle.
-  std::vector<std::shared_ptr<FclObject>> link_cylinders;
-  link_cylinders.reserve(3);
+  std::vector<std::shared_ptr<FclObject>> link_meshes;
+  link_meshes.reserve(3);
 
   std::shared_ptr<FclObject> base;
   assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.0), Mat3::Identity(), &base)));
-  link_cylinders.push_back(base);
+  link_meshes.push_back(base);
 
   std::shared_ptr<FclObject> link1;
   assert(ok(createSphere(0.1, Vec3(1.0, 0.0, 0.0), Mat3::Identity(), &link1)));
-  link_cylinders.push_back(link1);
+  link_meshes.push_back(link1);
 
   std::shared_ptr<FclObject> link2;
   assert(ok(createSphere(0.1, Vec3(2.0, 0.0, 0.0), Mat3::Identity(), &link2)));
-  link_cylinders.push_back(link2);
+  link_meshes.push_back(link2);
 
   std::vector<std::shared_ptr<FclObject>> obstacles;
   std::shared_ptr<FclObject> obstacle;
@@ -75,7 +74,7 @@ static void test_compute_contacts_basic_scene() {
   opt.num_links_ignore = 0;
 
   const CollisionContext ctx{
-      link_cylinders,
+      link_meshes,
       obstacles,
       grasped_object,
       spatial_jacobian};
@@ -125,7 +124,6 @@ static void test_contact_jacobian_structure() {
 
   const Vec3 p(0.2, -0.1, 0.3);
   Eigen::MatrixXd Jc;
-  assert(ok(getContactJacobian(/*link_index=*/1, p, spatial_jacobian, &Jc)));
   assert(Jc.rows() == 6);
   assert(Jc.cols() == 3);
 
@@ -146,8 +144,8 @@ static void test_self_collision_last_link_special_case() {
   // dof=3 => cylinders: [base, link1, link2, link3]
   // Ignore link1 for contact outputs. Last active link is link3.
   // Place link3 near base so only the last-link special case can catch it.
-  std::vector<std::shared_ptr<FclObject>> link_cylinders;
-  link_cylinders.reserve(4);
+  std::vector<std::shared_ptr<FclObject>> link_meshes;
+  link_meshes.reserve(4);
 
   std::shared_ptr<FclObject> base;
   std::shared_ptr<FclObject> link1;
@@ -157,10 +155,10 @@ static void test_self_collision_last_link_special_case() {
   assert(ok(createSphere(0.1, Vec3(5.00, 0.0, 0.0), Mat3::Identity(), &link1)));  // ignored
   assert(ok(createSphere(0.1, Vec3(2.00, 0.0, 0.0), Mat3::Identity(), &link2)));
   assert(ok(createSphere(0.1, Vec3(0.18, 0.0, 0.0), Mat3::Identity(), &link3)));  // penetrates base
-  link_cylinders.push_back(base);
-  link_cylinders.push_back(link1);
-  link_cylinders.push_back(link2);
-  link_cylinders.push_back(link3);
+  link_meshes.push_back(base);
+  link_meshes.push_back(link1);
+  link_meshes.push_back(link2);
+  link_meshes.push_back(link3);
 
   const std::vector<std::shared_ptr<FclObject>> obstacles;
   const std::shared_ptr<FclObject> grasped_object = nullptr;
@@ -173,7 +171,7 @@ static void test_self_collision_last_link_special_case() {
   opt.num_links_ignore = 1;
 
   const CollisionContext ctx{
-      link_cylinders,
+      link_meshes,
       obstacles,
       grasped_object,
       spatial_jacobian};
@@ -223,13 +221,13 @@ static void test_adjust_joints_invalid_options_rejected() {
 }
 
 static void test_null_obstacle_rejected() {
-  std::vector<std::shared_ptr<FclObject>> link_cylinders;
+  std::vector<std::shared_ptr<FclObject>> link_meshes;
   std::shared_ptr<FclObject> base;
   std::shared_ptr<FclObject> link1;
   assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.0), Mat3::Identity(), &base)));
   assert(ok(createSphere(0.1, Vec3(0.3, 0.0, 0.0), Mat3::Identity(), &link1)));
-  link_cylinders.push_back(base);
-  link_cylinders.push_back(link1);
+  link_meshes.push_back(base);
+  link_meshes.push_back(link1);
 
   std::vector<std::shared_ptr<FclObject>> obstacles;
   obstacles.push_back(nullptr);
@@ -240,7 +238,7 @@ static void test_null_obstacle_rejected() {
   opt.check_self_collision = false;
   opt.num_links_ignore = 0;
   const CollisionContext ctx{
-      link_cylinders,
+      link_meshes,
       obstacles,
       grasped_object,
       spatial_jacobian};

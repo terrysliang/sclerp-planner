@@ -263,23 +263,9 @@ MotionPlanResult planMotionSclerpWithCollision(
       grasped_object->setTransform(g_tool.block<3,1>(0, 3), g_tool.block<3,3>(0, 0));
     }
 
-    spatial_jacobian.resize(6, n);
-    st = solver.spatialJacobian(q, spatial_jacobian);
-    if (!ok(st)) {
-      log(LogLevel::Error, "planMotionSclerpWithCollision: spatialJacobian failed");
-      out.status = st;
-      out.iters = iters;
-      return out;
-    }
+    const CollisionContext cctx{ link_meshes, obstacles, grasped_object };
+    st = computeContacts(solver, q, cctx, opt.query, &contacts);
 
-    CollisionQueryOptions copt = opt.query;
-    const CollisionContext cctx{
-        link_meshes,
-        obstacles,
-        grasped_object,
-        spatial_jacobian};
-    contacts.contacts.clear();
-    st = computeContacts(cctx, copt, &contacts);
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerpWithCollision: computeContacts failed");
       out.status = st;

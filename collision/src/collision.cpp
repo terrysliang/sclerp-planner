@@ -27,6 +27,17 @@ static inline Vec3 safeNormal(const Vec3& from, const Vec3& to) {
   return Vec3::Zero();
 }
 
+static inline int activeSlotToCylinderIndex(int slot, int num_links_ignore) {
+  // slot 0 corresponds to link1 (link mesh index 1) if num_links_ignore == 0
+  // base is index 0 and is always excluded from env collision checks
+  return (1 + num_links_ignore) + slot;  // in [1 .. dof]
+}
+
+static inline int cylinderIndexToSolverLinkIndex(int cylinder_index) {
+  // cylinder index 1..dof => solver link_index 0..dof-1
+  return cylinder_index - 1;
+}
+
 FclObject::FclObject(std::shared_ptr<fcl::CollisionGeometryd> geometry,
                          const Vec3& position,
                          const Mat3& orientation)
@@ -248,339 +259,351 @@ Status checkCollision(const FclObject& obj1,
 
   fcl::DistanceRequestd request;
   request.enable_nearest_points = true;
-  // Keep signed distance disabled here: FCL's signed-distance path with
-  // GST_INDEP can assert on some mesh/contact cases. We recover penetration
-  // depth robustly below via an explicit collision query.
-  request.enable_signed_distance = false;
+  request.enable_signed_distance = false; // keep as you had
   request.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
   request.distance_tolerance = 1e-6;
   fcl::DistanceResultd result;
 
-  *min_dist = fcl::distance(&obj1.collisionObject(),
-                            &obj2.collisionObject(),
-                            request,
-                            result);
-  if (std::isnan(*min_dist)) {
-    log(LogLevel::Error, "checkCollision: min_dist is NaN");
+  double d = fcl::distance(&obj1.collisionObject(),
+                           &obj2.collisionObject(),
+                           request,
+                           result);
+  if (!std::isfinite(d)) {
+    log(LogLevel::Error, "checkCollision: distance is NaN/Inf");
     return Status::Failure;
   }
 
-  *contact_point_obj1 = result.nearest_points[0];
-  *contact_point_obj2 = result.nearest_points[1];
+  Vec3 p1 = result.nearest_points[0];
+  Vec3 p2 = result.nearest_points[1];
 
-  if (*min_dist < 0.0) {
-    fcl::CollisionRequestd collision_request;
-    collision_request.enable_contact = true;
-    collision_request.num_max_contacts = 16;
-    collision_request.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
-    fcl::CollisionResultd collision_result;
+  // if distance is ~0, we need a robust normal (avoid safeNormal=0).
+  const double kNearTol = 1e-9;
+  const bool points_degenerate = ((p2 - p1).squaredNorm() <= 1e-24); // ~1e-12 meters
+
+  if (d <= kNearTol || points_degenerate) {
+    // Use collision query to get a stable normal in touch/penetration
+    fcl::CollisionRequestd creq;
+    creq.enable_contact = true;
+    creq.num_max_contacts = 16;
+    creq.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
+    fcl::CollisionResultd cres;
+
     fcl::collide(&obj1.collisionObject(),
                  &obj2.collisionObject(),
-                 collision_request,
-                 collision_result);
+                 creq,
+                 cres);
 
-    double max_depth = 0.0;
-    const std::size_t num_contacts = collision_result.numContacts();
-    for (std::size_t i = 0; i < num_contacts; ++i) {
-      const auto& contact = collision_result.getContact(i);
-      if (std::isfinite(contact.penetration_depth)) {
-        max_depth = std::max(max_depth, contact.penetration_depth);
+    Vec3 n = Vec3::Zero();
+    Vec3 pos = Vec3::Zero();
+
+    if (cres.numContacts() > 0) {
+      const auto& c = cres.getContact(0);
+      n = c.normal;
+      pos = c.pos;
+
+      double nn = n.norm();
+      if (!std::isfinite(nn) || nn < 1e-12) {
+        n = Vec3::Zero();
+      } else {
+        n /= nn;
       }
     }
 
-    if (max_depth > 0.0 && std::isfinite(max_depth)) {
-      *min_dist = -max_depth;
-      if (num_contacts > 0) {
-        const auto& contact = collision_result.getContact(0);
-        const Vec3 normal = contact.normal;
-        const Vec3 point = contact.pos;
-        *contact_point_obj1 = point - 0.5 * max_depth * normal;
-        *contact_point_obj2 = point + 0.5 * max_depth * normal;
+    if (n.norm() < 1e-12) {
+      // Fallback direction: center-to-center (never zero unless identical transforms)
+      const auto t1 = obj1.collisionObject().getTranslation();
+      const auto t2 = obj2.collisionObject().getTranslation();
+      Vec3 dir = t2 - t1;
+      const double nd = dir.norm();
+      if (nd > 1e-12) {
+        n = dir / nd;
+      } else {
+        n = Vec3::UnitX();
       }
-    } else if (*min_dist < -1e-6) {
-      // Fallback guard against implementation-defined signed distance (often -1).
-      *min_dist = -1e-6;
+      pos = 0.5 * (t1 + t2);
     }
-    log(LogLevel::Warn, "checkCollision: penetration detected");
+
+    // Manufacture two distinct points separated by eps along n
+    constexpr double eps = 1e-6; // 1 micron; enough to make safeNormal non-zero
+    p1 = pos - eps * n; // on obj1 side
+    p2 = pos + eps * n; // on obj2 side
+
+    d = 0.0; // clamp to non-negative; penetration depth not returned
   }
 
-  return Status::Success;
-}
-
-Status getContactJacobian(int link_index,
-                          const Vec3& contact_point,
-                          const Eigen::MatrixXd& spatial_jacobian,
-                          Eigen::MatrixXd* contact_jacobian) {
-  if (!validOut(contact_jacobian, "getContactJacobian: null output")) return Status::InvalidParameter;
-
-  const int cols = spatial_jacobian.cols();
-  if (link_index < 0 || link_index >= cols) {
-    log(LogLevel::Error, "getContactJacobian: link_index out of range");
-    return Status::InvalidParameter;
-  }
-
-  const Mat3 P_hat = sclerp::core::hat3(contact_point);
-  Eigen::MatrixXd Js = Eigen::MatrixXd::Zero(6, cols);
-  // link_index is 0-based; include columns up to and including link_index.
-  Js.leftCols(link_index + 1) = spatial_jacobian.leftCols(link_index + 1);
-
-  Eigen::MatrixXd temp = (Eigen::MatrixXd(3, 6) << Mat3::Identity(), -P_hat).finished() * Js;
-
-  contact_jacobian->resize(6, temp.cols());
-  *contact_jacobian << temp, Eigen::MatrixXd::Zero(3, temp.cols());
-
+  *min_dist = std::max(d, 0.0);
+  *contact_point_obj1 = p1;
+  *contact_point_obj2 = p2;
   return Status::Success;
 }
 
 static Status computeContactArrays(
-    const std::vector<std::shared_ptr<FclObject>>& link_cylinders,
+    const sclerp::core::KinematicsSolver& solver,
+    const Eigen::VectorXd& q,
+    const std::vector<std::shared_ptr<FclObject>>& link_cylinders,  // includes base at 0
     const std::vector<std::shared_ptr<FclObject>>& obstacles,
     const std::shared_ptr<FclObject>& grasped_object,
-    const Eigen::MatrixXd& spatial_jacobian,
     bool check_self_collision,
     int num_links_ignore,
     int dof,
-    Eigen::MatrixXd* contact_normal_array,
+    Eigen::MatrixXd* contact_normal_array_3xN,
     std::vector<double>* dist_array,
-    std::vector<Eigen::MatrixXd>* contact_points_array,
-    std::vector<Eigen::MatrixXd>* j_contact_array) {
-  if (!validOut(contact_normal_array, "computeContacts: null contact_normal_array")) return Status::InvalidParameter;
-  if (!validOut(dist_array, "computeContacts: null dist_array")) return Status::InvalidParameter;
-  if (!validOut(contact_points_array, "computeContacts: null contact_points_array")) return Status::InvalidParameter;
-  if (!validOut(j_contact_array, "computeContacts: null j_contact_array")) return Status::InvalidParameter;
+    std::vector<Eigen::MatrixXd>* contact_points_array_3x2,
+    std::vector<Eigen::MatrixXd>* j_contact_array_3xk,   // reduced (3×k)
+    std::vector<bool>* has_contact
+) {
+  if (!validOut(contact_normal_array_3xN, "computeContactArrays: null contact_normal_array")) return Status::InvalidParameter;
+  if (!validOut(dist_array, "computeContactArrays: null dist_array")) return Status::InvalidParameter;
+  if (!validOut(contact_points_array_3x2, "computeContactArrays: null contact_points_array")) return Status::InvalidParameter;
+  if (!validOut(j_contact_array_3xk, "computeContactArrays: null j_contact_array")) return Status::InvalidParameter;
+  if (!validOut(has_contact, "computeContactArrays: null has_contact")) return Status::InvalidParameter;
+
+  if (solver.model().dof() != dof || q.size() != dof) {
+    log(LogLevel::Error, "computeContactArrays: solver/q dof mismatch");
+    return Status::InvalidParameter;
+  }
 
   const int grasped_obj_con = grasped_object ? 1 : 0;
   const int total_links = dof - num_links_ignore;
   if (total_links <= 0) {
-    log(LogLevel::Error, "computeContacts: invalid total_links");
+    log(LogLevel::Error, "computeContactArrays: invalid total_links");
+    return Status::InvalidParameter;
+  }
+  const int total_contacts = total_links + grasped_obj_con;
+
+  // Need at least base + dof link cylinders: indices [0..dof]
+  if (static_cast<int>(link_cylinders.size()) < dof + 1) {
+    log(LogLevel::Error, "computeContactArrays: link_cylinders size insufficient");
     return Status::InvalidParameter;
   }
 
-  const int total_contacts = total_links + grasped_obj_con;
-  dist_array->assign(total_contacts, 1000.0);
-  *contact_normal_array = Eigen::MatrixXd::Zero(6, total_contacts);
-  contact_points_array->assign(total_contacts, Eigen::MatrixXd::Zero(3, 2));
-  j_contact_array->assign(total_contacts,
-                          Eigen::MatrixXd::Zero(6, spatial_jacobian.cols()));
-  std::vector<bool> has_contact(static_cast<size_t>(total_contacts), false);
+  // Init
+  dist_array->assign(total_contacts, 1e9);  // far away
+  *contact_normal_array_3xN = Eigen::MatrixXd::Zero(3, total_contacts);
+  contact_points_array_3x2->assign(total_contacts, Eigen::MatrixXd::Zero(3, 2));
+  j_contact_array_3xk->clear();
+  j_contact_array_3xk->resize(static_cast<size_t>(total_contacts));
+  has_contact->assign(static_cast<size_t>(total_contacts), false);
+
+  // Pre-size reduced Jacobians (keep zero if we never get a closest point)
+  for (int slot = 0; slot < total_links; ++slot) {
+    const int cyl_idx = activeSlotToCylinderIndex(slot, num_links_ignore); // 1..dof
+    const int link_index = cylinderIndexToSolverLinkIndex(cyl_idx);        // 0..dof-1
+    (*j_contact_array_3xk)[static_cast<size_t>(slot)] = Eigen::MatrixXd::Zero(3, link_index + 1);
+  }
+  if (grasped_object) {
+    (*j_contact_array_3xk)[static_cast<size_t>(total_links)] = Eigen::MatrixXd::Zero(3, dof);
+  }
+
+  // Helper: accept an update only if we get a valid normal (avoid infeasible LCP rows)
+  auto tryUpdateSlot = [&](int slot, double d, const Vec3& p_obj, const Vec3& p_link) {
+    d = std::max(d, 0.0);
+    if (d >= (*dist_array)[slot]) return;
+
+    const Vec3 n = safeNormal(p_obj, p_link);
+    if (n.squaredNorm() <= 1e-24) {
+      // Degenerate nearest points: don't lock in a zero normal.
+      return;
+    }
+
+    (*dist_array)[slot] = d;
+    contact_normal_array_3xN->col(slot) = n;
+    (*contact_points_array_3x2)[slot] << p_obj, p_link;
+    (*has_contact)[static_cast<size_t>(slot)] = true;
+  };
+
+  // Environment collision checks
   for (const auto& obstacle : obstacles) {
-    if (!obstacle) {
-      log(LogLevel::Error, "computeContacts: obstacle is null");
-      return Status::InvalidParameter;
-    }
-    for (int itr_index = 1; itr_index <= total_links; ++itr_index) {
-      const int num_link = num_links_ignore + itr_index;
-      if (num_link < 0 || static_cast<size_t>(num_link) >= link_cylinders.size()) {
-        log(LogLevel::Error, "computeContacts: link cylinder index out of range");
-        return Status::InvalidParameter;
-      }
-      const auto& current_cylinder = link_cylinders[num_link];
-      if (!current_cylinder) {
-        log(LogLevel::Error, "computeContacts: link cylinder is null");
-        return Status::Failure;
-      }
+    if (!obstacle) return Status::InvalidParameter;
 
-      Vec3 cp_obj, cp_cylinder;
+    for (int slot = 0; slot < total_links; ++slot) {
+      const int cyl_idx = activeSlotToCylinderIndex(slot, num_links_ignore); // 1..dof
+      const auto& cyl = link_cylinders[cyl_idx];
+      if (!cyl) return Status::Failure;
+
+      Vec3 cp_obj, cp_link;
       double min_d = 0.0;
-      const Status st = checkCollision(*obstacle,
-                                       *current_cylinder,
-                                       &min_d,
-                                       &cp_obj,
-                                       &cp_cylinder);
-      if (!ok(st)) {
-        log(LogLevel::Error, "computeContacts: collision check failed (environment)");
-        return st;
-      }
+      const Status st = checkCollision(*obstacle, *cyl, &min_d, &cp_obj, &cp_link);
+      if (!ok(st)) return st;
 
-      if (min_d < (*dist_array)[itr_index - 1]) {
-        (*dist_array)[itr_index - 1] = min_d;
-        contact_normal_array->block<3,1>(0, itr_index - 1) = safeNormal(cp_obj, cp_cylinder);
-        (*contact_points_array)[itr_index - 1] << cp_obj, cp_cylinder;
-        has_contact[static_cast<size_t>(itr_index - 1)] = true;
+      tryUpdateSlot(slot, min_d, cp_obj, cp_link);
+    }
+  }
+
+  // Grasped object vs. environment
+  if (grasped_object) {
+    const int grasp_slot = total_links;
+
+    for (const auto& obstacle : obstacles) {
+      if (!obstacle) return Status::InvalidParameter;
+
+      Vec3 cp_obj, cp_grasp;
+      double min_d = 0.0;
+      const Status st = checkCollision(*obstacle, *grasped_object, &min_d, &cp_obj, &cp_grasp);
+      if (!ok(st)) return st;
+
+      tryUpdateSlot(grasp_slot, min_d, cp_obj, cp_grasp);
+    }
+  }
+
+  // Self-collision (optional)
+  if (check_self_collision) {
+    for (int slot = 0; slot < total_links; ++slot) {
+      const int cyl_idx1 = activeSlotToCylinderIndex(slot, num_links_ignore); // moving
+      const auto& link1 = link_cylinders[cyl_idx1];
+      if (!link1) return Status::Failure;
+
+      const bool is_last = (slot == total_links - 1);
+
+      // Compare against base(0) and other active links.
+      for (int obs_slot = -1; obs_slot < total_links; ++obs_slot) {
+        const int cyl_idx2 =
+            (obs_slot < 0) ? 0 : activeSlotToCylinderIndex(obs_slot, num_links_ignore);
+        if (cyl_idx2 == cyl_idx1) continue;
+
+        // Skip adjacent links (same policy as your original; keep if you like)
+        if (!is_last && obs_slot >= 0) {
+          if (obs_slot == slot - 1 || obs_slot == slot || obs_slot == slot + 1) continue;
+        }
+
+        const auto& link2 = link_cylinders[cyl_idx2];
+        if (!link2) return Status::Failure;
+
+        Vec3 cp2, cp1;
+        double min_d = 0.0;
+        const Status st = checkCollision(*link2, *link1, &min_d, &cp2, &cp1);
+        if (!ok(st)) return st;
+
+        // Here: p_obj is on link2, p_link is on link1 (moving link)
+        tryUpdateSlot(slot, min_d, cp2, cp1);
       }
     }
+  }
+
+  // Per-contact reduced point Jacobians using solver
+  for (int slot = 0; slot < total_links; ++slot) {
+    if (!(*has_contact)[static_cast<size_t>(slot)]) {
+      continue; // keep zero Jacobian; distance is huge
+    }
+    if (contact_normal_array_3xN->col(slot).squaredNorm() <= 1e-24) {
+      continue; // extra guard
+    }
+
+    const int cyl_idx = activeSlotToCylinderIndex(slot, num_links_ignore); // 1..dof
+    const int link_index = cylinderIndexToSolverLinkIndex(cyl_idx);        // 0..dof-1
+
+    const Vec3 p_link = (*contact_points_array_3x2)[slot].col(1); // point on robot link
+    Eigen::MatrixXd Jp(3, link_index + 1);
+    const Status st = solver.pointJacobianPrefix(q, link_index, p_link, Jp);
+    if (!ok(st)) return st;
+
+    (*j_contact_array_3xk)[static_cast<size_t>(slot)] = std::move(Jp);
   }
 
   if (grasped_object) {
-    for (const auto& obstacle : obstacles) {
-      if (!obstacle) {
-        log(LogLevel::Error, "computeContacts: obstacle is null");
-        return Status::InvalidParameter;
-      }
-      Vec3 cp_obstacle, cp_grasped;
-      double min_d = 0.0;
-      const Status st = checkCollision(*obstacle,
-                                       *grasped_object,
-                                       &min_d,
-                                       &cp_obstacle,
-                                       &cp_grasped);
-      if (!ok(st)) {
-        log(LogLevel::Error, "computeContacts: collision check failed (grasped object)");
-        return st;
-      }
+    const int grasp_slot = total_links;
+    if ((*has_contact)[static_cast<size_t>(grasp_slot)] &&
+        contact_normal_array_3xN->col(grasp_slot).squaredNorm() > 1e-24) {
 
-      if (min_d < (*dist_array)[total_links]) {
-        (*dist_array)[total_links] = min_d;
-        contact_normal_array->block<3,1>(0, total_links) = safeNormal(cp_obstacle, cp_grasped);
-        (*contact_points_array)[total_links] << cp_obstacle, cp_grasped;
-        has_contact[static_cast<size_t>(total_links)] = true;
-      }
-    }
-  }
+      const Vec3 p_grasp = (*contact_points_array_3x2)[grasp_slot].col(1); // point on grasped object
+      // Treat grasped object as attached to last joint: link_index = dof-1 => k=dof
+      Eigen::MatrixXd Jp(3, dof);
+      const Status st = solver.pointJacobianPrefix(q, dof - 1, p_grasp, Jp);
+      if (!ok(st)) return st;
 
-  if (check_self_collision) {
-    // Self-collision indices are in "active link" space:
-    // active itr_index 1 maps to cylinder num_links_ignore + 1.
-    for (int itr_index = 1; itr_index <= total_links; ++itr_index) {
-      const int moving_link_index = num_links_ignore + itr_index;
-      if (moving_link_index < 0 || static_cast<size_t>(moving_link_index) >= link_cylinders.size()) {
-        log(LogLevel::Error, "computeContacts: moving link index out of range");
-        return Status::InvalidParameter;
-      }
-      const auto& link1 = link_cylinders[moving_link_index];
-      if (!link1) {
-        log(LogLevel::Error, "computeContacts: self-collision moving link is null");
-        return Status::Failure;
-      }
-
-      const bool is_last_link = (itr_index == total_links);
-      for (int obs_itr = 0; obs_itr <= total_links; ++obs_itr) {
-        const int obstacle_link_index = (obs_itr == 0) ? 0 : (num_links_ignore + obs_itr);
-        if (obstacle_link_index < 0 || static_cast<size_t>(obstacle_link_index) >= link_cylinders.size()) {
-          log(LogLevel::Error, "computeContacts: obstacle link index out of range");
-          return Status::InvalidParameter;
-        }
-
-        if (obstacle_link_index == moving_link_index) {
-          continue;
-        }
-        if (!is_last_link &&
-            (obs_itr == itr_index - 1 || obs_itr == itr_index || obs_itr == itr_index + 1)) {
-          continue;
-        }
-
-        const auto& link2 = link_cylinders[obstacle_link_index];
-        if (!link2) {
-          log(LogLevel::Error, "computeContacts: self-collision obstacle link is null");
-          return Status::Failure;
-        }
-        Vec3 cp_link1, cp_link2;
-        double min_d = 0.0;
-        const Status st = checkCollision(*link2,
-                                         *link1,
-                                         &min_d,
-                                         &cp_link2,
-                                         &cp_link1);
-        if (!ok(st)) {
-          log(LogLevel::Error, "computeContacts: self-collision check failed");
-          return st;
-        }
-
-        if (min_d < (*dist_array)[itr_index - 1]) {
-          (*dist_array)[itr_index - 1] = min_d;
-          contact_normal_array->block<3,1>(0, itr_index - 1) = safeNormal(cp_link2, cp_link1);
-          (*contact_points_array)[itr_index - 1] << cp_link2, cp_link1;
-          has_contact[static_cast<size_t>(itr_index - 1)] = true;
-        }
-      }
-    }
-  }
-
-  for (int i = 0; i < total_contacts; ++i) {
-    if (!has_contact[static_cast<size_t>(i)]) {
-      continue;
-    }
-    const Vec3 contact_point = (*contact_points_array)[i].col(1);
-    const int idx = grasped_object && i == total_links
-      ? i + num_links_ignore - 1
-      : i + num_links_ignore;
-    const Status st = getContactJacobian(idx, contact_point, spatial_jacobian, &(*j_contact_array)[i]);
-    if (!ok(st)) {
-      log(LogLevel::Error, "computeContacts: getContactJacobian failed");
-      return st;
+      (*j_contact_array_3xk)[static_cast<size_t>(grasp_slot)] = std::move(Jp);
     }
   }
 
   return Status::Success;
 }
 
-Status computeContacts(const CollisionContext& ctx,
-                       const CollisionQueryOptions& opt,
-                       ContactSet* out) {
+
+Status computeContacts(
+    const sclerp::core::KinematicsSolver& solver,
+    const Eigen::VectorXd& q,
+    const CollisionContext& ctx,
+    const CollisionQueryOptions& opt,
+    ContactSet* out) {
   if (!validOut(out, "computeContacts: null output")) return Status::InvalidParameter;
 
-  if (ctx.spatial_jacobian.rows() != 6) {
-    log(LogLevel::Error, "computeContacts: spatial_jacobian must have 6 rows");
-    return Status::InvalidParameter;
-  }
-  const int dof = static_cast<int>(ctx.spatial_jacobian.cols());
-  if (dof <= 0) {
-    log(LogLevel::Error, "computeContacts: invalid dof");
-    return Status::InvalidParameter;
-  }
-  if (ctx.link_cylinders.size() < static_cast<size_t>(dof + 1)) {
-    log(LogLevel::Error, "computeContacts: insufficient link objects for dof");
+  const int dof = solver.model().dof();
+  if (dof <= 0) return Status::InvalidParameter;
+  if (q.size() != dof) return Status::InvalidParameter;
+
+  if (opt.num_links_ignore < 0 || opt.num_links_ignore >= dof) return Status::InvalidParameter;
+  if (static_cast<int>(ctx.link_cylinders.size()) < dof + 1) {
+    log(LogLevel::Error, "computeContacts: link_cylinders size insufficient");
     return Status::InvalidParameter;
   }
 
-  Eigen::MatrixXd contact_normal_array;
-  std::vector<double> dist_array;
-  std::vector<Eigen::MatrixXd> contact_points_array;
-  std::vector<Eigen::MatrixXd> j_contact_array;
+  Eigen::MatrixXd normals_3xN;
+  std::vector<double> dists;
+  std::vector<Eigen::MatrixXd> points_3x2;
+  std::vector<Eigen::MatrixXd> Jc_3xk;
+  std::vector<bool> has_contact;
 
   const Status st = computeContactArrays(
+      solver,
+      q,
       ctx.link_cylinders,
       ctx.obstacles,
       ctx.grasped_object,
-      ctx.spatial_jacobian,
       opt.check_self_collision,
       opt.num_links_ignore,
       dof,
-      &contact_normal_array,
-      &dist_array,
-      &contact_points_array,
-      &j_contact_array);
+      &normals_3xN,
+      &dists,
+      &points_3x2,
+      &Jc_3xk,
+      &has_contact);
   if (!ok(st)) return st;
 
   const bool has_grasped = static_cast<bool>(ctx.grasped_object);
   const int grasped_obj_con = has_grasped ? 1 : 0;
   const int total_links = dof - opt.num_links_ignore;
   const int total_contacts = total_links + grasped_obj_con;
-  if (total_links <= 0 || total_contacts < 0) {
-    log(LogLevel::Error, "computeContacts: invalid contact dimensions");
-    return Status::InvalidParameter;
+
+  if (static_cast<int>(dists.size()) != total_contacts ||
+      normals_3xN.cols() != total_contacts ||
+      static_cast<int>(points_3x2.size()) != total_contacts ||
+      static_cast<int>(Jc_3xk.size()) != total_contacts) {
+    log(LogLevel::Error, "computeContacts: returned array size mismatch");
+    return Status::Failure;
   }
 
   out->contacts.clear();
   out->contacts.reserve(static_cast<size_t>(total_contacts));
 
-  for (int i = 0; i < total_contacts; ++i) {
-    Contact contact;
-    if (static_cast<size_t>(i) < dist_array.size()) {
-      contact.distance = dist_array[static_cast<size_t>(i)];
-    }
-    if (i < contact_normal_array.cols()) {
-      contact.normal = contact_normal_array.block<3,1>(0, i);
-    }
+  // Robot link contact slots
+  for (int slot = 0; slot < total_links; ++slot) {
+    const int cyl_idx = activeSlotToCylinderIndex(slot, opt.num_links_ignore); // 1..dof
+    const int link_index = cylinderIndexToSolverLinkIndex(cyl_idx);            // 0..dof-1
 
-    if (static_cast<size_t>(i) < contact_points_array.size() &&
-        contact_points_array[static_cast<size_t>(i)].cols() == 2) {
-      contact.point_obj = contact_points_array[static_cast<size_t>(i)].col(0);
-      contact.point_link = contact_points_array[static_cast<size_t>(i)].col(1);
-    }
+    Contact c;
+    c.link_index = link_index;
+    c.is_grasped = false;
+    c.distance = std::max(dists[static_cast<size_t>(slot)], 0.0);
+    c.normal = normals_3xN.col(slot);
+    c.point_obj = points_3x2[static_cast<size_t>(slot)].col(0);
+    c.point_link = points_3x2[static_cast<size_t>(slot)].col(1);
+    c.J_contact = Jc_3xk[static_cast<size_t>(slot)]; // 3×(link_index+1), or zeros if no_contact
+    out->contacts.push_back(std::move(c));
+  }
 
-    if (static_cast<size_t>(i) < j_contact_array.size()) {
-      contact.J_contact = j_contact_array[static_cast<size_t>(i)];
-    }
+  // Grasped object slot (optional)
+  if (has_grasped) {
+    const int slot = total_links;
 
-    if (has_grasped && i == total_links) {
-      contact.is_grasped = true;
-      contact.link_index = -1;
-    } else {
-      contact.link_index = i + opt.num_links_ignore;
-    }
-
-    out->contacts.push_back(std::move(contact));
+    Contact c;
+    c.link_index = -1;
+    c.is_grasped = true;
+    c.distance = std::max(dists[static_cast<size_t>(slot)], 0.0);
+    c.normal = normals_3xN.col(slot);
+    c.point_obj = points_3x2[static_cast<size_t>(slot)].col(0);
+    c.point_link = points_3x2[static_cast<size_t>(slot)].col(1);
+    c.J_contact = Jc_3xk[static_cast<size_t>(slot)]; // 3×dof, or zeros if no_contact
+    out->contacts.push_back(std::move(c));
   }
 
   return Status::Success;

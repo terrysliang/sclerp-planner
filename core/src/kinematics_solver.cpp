@@ -31,7 +31,7 @@ static Transform jointExp(const JointSpec& j, double q) {
   return T;
 }
 
-static AdjointMatrix adjointVW(const Transform& T) {
+static AdjointMatrix adjoint(const Transform& T) {
   const Mat3 R = T.rotation();
   const Vec3 p = T.translation();
 
@@ -141,14 +141,97 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
   Transform prod = Transform::Identity();  // Π_{k<i} exp(joint_k)
   for (int i = 1; i < n; ++i) {
     prod = prod * jointExp(model_.joint(i - 1), q(i - 1));
-    const AdjointMatrix Ad = adjointVW(prod);
+    const AdjointMatrix Ad = adjoint(prod);
     J_space.col(i) = Ad * S_space.col(i);
   }
 
   if (model_.has_base_offset()) {
-    const AdjointMatrix Ad_base = adjointVW(model_.base_offset());
+    const AdjointMatrix Ad_base = adjoint(model_.base_offset());
     J_space = Ad_base * J_space;
   }
+  return Status::Success;
+}
+
+// 1) Space Jacobian prefix (VW ordering) for joints [0..link_index].
+//    Output is 6×(link_index+1). Columns are [v; w] in the space frame (after base_offset if any).
+Status KinematicsSolver::spatialJacobianPrefix(
+    const Eigen::VectorXd& q,
+    int link_index,
+    Eigen::Ref<Eigen::MatrixXd> J_space_prefix) const {
+
+  const int n = model_.dof();
+  if (q.size() != n) {
+    log(LogLevel::Error, "spatialJacobianPrefix: q size mismatch");
+    return Status::InvalidParameter;
+  }
+  if (link_index < 0 || link_index >= n) {
+    log(LogLevel::Error, "spatialJacobianPrefix: link_index out of range");
+    return Status::InvalidParameter;
+  }
+
+  const int k = link_index + 1;
+  if (J_space_prefix.rows() != 6 || J_space_prefix.cols() != k) {
+    log(LogLevel::Error, "spatialJacobianPrefix: output size mismatch (need 6×(link_index+1))");
+    return Status::InvalidParameter;
+  }
+
+  const ScrewMatrix& S_space = model_.S_space();  // columns are [v; w]
+
+  // Fill columns 0..link_index using the same recursion as spatialJacobian(), but stop at k.
+  J_space_prefix.setZero();
+  J_space_prefix.col(0) = S_space.col(0);
+
+  Transform prod = Transform::Identity();  // Π_{m<i} exp(joint_m)
+  for (int i = 1; i < k; ++i) {
+    prod = prod * jointExp(model_.joint(i - 1), q(i - 1));
+    const AdjointMatrix Ad = adjoint(prod);     // [v; w] convention
+    J_space_prefix.col(i) = Ad * S_space.col(i);
+  }
+
+  if (model_.has_base_offset()) {
+    const AdjointMatrix Ad_base = adjoint(model_.base_offset());
+    J_space_prefix = Ad_base * J_space_prefix;
+  }
+
+  return Status::Success;
+}
+
+// 2) Contact-point linear Jacobian (prefix) for a point expressed in the same space/world frame.
+//    Output is 3×(link_index+1): p_dot = J_point_prefix * q_dot
+//    Using your [v; w] convention: p_dot = v + w×p = v - hat(p)*w.
+Status KinematicsSolver::pointJacobianPrefix(
+    const Eigen::VectorXd& q,
+    int link_index,
+    const Vec3& point_space,  // point position in the same "space" frame used by the Jacobian
+    Eigen::Ref<Eigen::MatrixXd> J_point_prefix) const {
+
+  const int n = model_.dof();
+  if (q.size() != n) {
+    log(LogLevel::Error, "pointJacobianPrefix: q size mismatch");
+    return Status::InvalidParameter;
+  }
+  if (link_index < 0 || link_index >= n) {
+    log(LogLevel::Error, "pointJacobianPrefix: link_index out of range");
+    return Status::InvalidParameter;
+  }
+
+  const int k = link_index + 1;
+  if (J_point_prefix.rows() != 3 || J_point_prefix.cols() != k) {
+    log(LogLevel::Error, "pointJacobianPrefix: output size mismatch (need 3×(link_index+1))");
+    return Status::InvalidParameter;
+  }
+
+  // Compute prefix space Jacobian (6×k) then convert to point linear Jacobian (3×k).
+  Eigen::MatrixXd J6(6, k);
+  const Status st = spatialJacobianPrefix(q, link_index, J6);
+  if (!ok(st)) return st;
+
+  const Eigen::MatrixXd Jv = J6.topRows(3);
+  const Eigen::MatrixXd Jw = J6.bottomRows(3);
+
+  const Mat3 P_hat = hat3(point_space);
+  J_point_prefix = Jv - P_hat * Jw;
+
   return Status::Success;
 }
 

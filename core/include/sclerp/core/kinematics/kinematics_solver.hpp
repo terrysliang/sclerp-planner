@@ -42,7 +42,12 @@ public:
   Status spatialJacobian(const Eigen::VectorXd& q,
                          Eigen::Ref<Eigen::MatrixXd> J_space) const;
 
-  // Dual-quat RMRC
+  Status spatialJacobianPrefix(const Eigen::VectorXd& q, int link_index, 
+                               Eigen::Ref<Eigen::MatrixXd> J_space_prefix) const;
+  Status pointJacobianPrefix(const Eigen::VectorXd& q, int link_index,
+                             const Vec3& point_space,
+                             Eigen::Ref<Eigen::MatrixXd> J_point_prefix) const;
+    // Dual-quat RMRC
   struct RmrcWorkspace {
     Eigen::MatrixXd s_jac;  // 6 x n
   };

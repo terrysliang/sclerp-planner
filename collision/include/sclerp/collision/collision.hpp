@@ -2,6 +2,7 @@
 
 #include "sclerp/core/common/status.hpp"
 #include "sclerp/core/math/types.hpp"
+#include "sclerp/core/kinematics/kinematics_solver.hpp"
 #include "sclerp/collision/types.hpp"
 
 #include <Eigen/Core>
@@ -115,20 +116,15 @@ Status checkCollision(const FclObject& obj1,
                       Vec3* contact_point_obj1,
                       Vec3* contact_point_obj2);
 
-// link_index is 0-based joint index; columns [0..link_index] are used.
-Status getContactJacobian(int link_index,
-                          const Vec3& contact_point,
-                          const Eigen::MatrixXd& spatial_jacobian,
-                          Eigen::MatrixXd* contact_jacobian);
-
 struct CollisionContext {
-  const std::vector<std::shared_ptr<FclObject>>& link_cylinders;
+  const std::vector<std::shared_ptr<FclObject>>& link_cylinders;  // includes base at index 0
   const std::vector<std::shared_ptr<FclObject>>& obstacles;
   const std::shared_ptr<FclObject>& grasped_object;
-  const Eigen::MatrixXd& spatial_jacobian;
 };
 
-Status computeContacts(const CollisionContext& ctx,
+Status computeContacts(const sclerp::core::KinematicsSolver& solver,
+                       const Eigen::VectorXd& q,
+                       const CollisionContext& ctx,
                        const CollisionQueryOptions& opt,
                        ContactSet* out);
 

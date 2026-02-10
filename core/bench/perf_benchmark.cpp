@@ -94,7 +94,7 @@ static Transform jointExpBench(const sclerp::core::JointSpec& j, double q) {
   return T;
 }
 
-static AdjointMatrix adjointVWBench(const Transform& T) {
+static AdjointMatrix adjointBench(const Transform& T) {
   const Mat3 R = T.rotation();
   const Vec3 p = T.translation();
 
@@ -150,7 +150,7 @@ static Status spatialJacobianBaseline(const ManipulatorModel& model,
   Transform prod = Transform::Identity();
   for (int i = 1; i < n; ++i) {
     prod = prod * jointExpBench(model.joint(i - 1), q(i - 1));
-    const AdjointMatrix Ad = adjointVWBench(prod);
+    const AdjointMatrix Ad = adjointBench(prod);
     J_space->col(i) = Ad * joint_twists.col(i);
   }
 

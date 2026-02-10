@@ -9,11 +9,20 @@
 namespace sclerp::collision {
 
 struct CollisionAvoidanceOptions {
-  double safe_dist = 0.01;
+  // Hard boundary around obstacles (paper: col_tol / epsilon)
+  double safe_dist = 0.005;
+
+  // Efficiency-only: when to include constraint in the LCP (paper: comp_activate_tol)
+  // Typical: comp_activate_tol >= safe_dist
+  double comp_activate_tol = 0.01;
+
+  // Discretization timestep h
   double dt = 0.001;
-  // Contact Jacobian pseudo-inverse configuration, default to be damped mode,
-  // which is highly recommended to ensure LCP convergence.
-  sclerp::core::SvdPseudoInverseOptions svd{};
+
+  // Optional damping for analytic pseudo-inverse:
+  // J^T (J J^T + lambda I)^-1, still “closed form” and only a 3×3 solve.
+  double pinv_lambda = 1e-9;
+
 };
 
 sclerp::core::Status adjustJoints(
