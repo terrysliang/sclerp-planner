@@ -11,6 +11,12 @@
 
 namespace sclerp::core {
 
+// Kinematics + differential kinematics for a serial-chain `ManipulatorModel`.
+//
+// Key outputs are expressed in the same world frame as the model:
+// - Space Jacobian is 6×n with twist ordering [v; w].
+// - FK returns `g_base_tool` as a `Transform` (SE(3)).
+// - If `model.base_offset()` is non-identity, FK/Jacobians are left-multiplied / adjointed by it.
 enum class RmrcDamping : std::uint8_t {
   None = 0,
   Constant = 1,
@@ -42,12 +48,13 @@ public:
   Status spatialJacobian(const Eigen::VectorXd& q,
                          Eigen::Ref<Eigen::MatrixXd> J_space) const;
 
-  Status spatialJacobianPrefix(const Eigen::VectorXd& q, int link_index, 
+  Status spatialJacobianUpToLink(const Eigen::VectorXd& q, int link_index, 
                                Eigen::Ref<Eigen::MatrixXd> J_space_prefix) const;
-  Status pointJacobianPrefix(const Eigen::VectorXd& q, int link_index,
+  Status pointJacobianUpToLink(const Eigen::VectorXd& q, int link_index,
                              const Vec3& point_space,
                              Eigen::Ref<Eigen::MatrixXd> J_point_prefix) const;
-    // Dual-quat RMRC
+  // Dual-quat RMRC:
+  // Computes a small joint increment that moves the end-effector from dq_i toward dq_f.
   struct RmrcWorkspace {
     Eigen::MatrixXd s_jac;  // 6 x n
   };

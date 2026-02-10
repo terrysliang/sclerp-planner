@@ -1,3 +1,6 @@
+// Simple task-space distance helpers used by planners.
+// - Position distance is Euclidean norm in meters.
+// - Rotation distance delegates to SO(3) helpers and returns chordal quaternion distance.
 #include "sclerp/core/math/distance.hpp"
 #include "sclerp/core/math/so3.hpp"
 #include "sclerp/core/math/types.hpp"

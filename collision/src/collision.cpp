@@ -1,3 +1,11 @@
+// Collision/contact extraction using FCL.
+//
+// Design notes:
+// - We compute a nearest contact per active link-slot (and optional grasped object slot) to keep
+//   the avoidance LCP small and predictable.
+// - We do not use signed distance; penetrations are treated as distance 0 with a robust normal.
+// - When nearest points are degenerate near touch, we fall back to an FCL collide() query to
+//   recover a usable contact normal for push-out.
 #include "sclerp/collision/collision.hpp"
 
 #include "sclerp/core/common/logger.hpp"
@@ -226,7 +234,7 @@ Status buildLinkMeshes(const std::vector<std::string>& stl_files,
   return Status::Success;
 }
 
-Status updateLinkMeshTransforms(std::vector<std::shared_ptr<FclObject>>& link_meshes,
+Status updateLinkMeshTransforms(const std::vector<std::shared_ptr<FclObject>>& link_meshes,
                                 const std::vector<Mat4>& g_intermediate,
                                 const std::vector<Mat4>& mesh_offset_transforms) {
   if (link_meshes.size() != g_intermediate.size()) {
@@ -340,7 +348,7 @@ Status checkCollision(const FclObject& obj1,
 static Status computeContactArrays(
     const sclerp::core::KinematicsSolver& solver,
     const Eigen::VectorXd& q,
-    const std::vector<std::shared_ptr<FclObject>>& link_cylinders,  // includes base at 0
+    const std::vector<std::shared_ptr<FclObject>>& link_meshes,  // includes base at 0
     const std::vector<std::shared_ptr<FclObject>>& obstacles,
     const std::shared_ptr<FclObject>& grasped_object,
     bool check_self_collision,
@@ -371,9 +379,9 @@ static Status computeContactArrays(
   }
   const int total_contacts = total_links + grasped_obj_con;
 
-  // Need at least base + dof link cylinders: indices [0..dof]
-  if (static_cast<int>(link_cylinders.size()) < dof + 1) {
-    log(LogLevel::Error, "computeContactArrays: link_cylinders size insufficient");
+  // Need at least base + dof link meshes: indices [0..dof]
+  if (static_cast<int>(link_meshes.size()) < dof + 1) {
+    log(LogLevel::Error, "computeContactArrays: link_meshes size insufficient");
     return Status::InvalidParameter;
   }
 
@@ -418,7 +426,7 @@ static Status computeContactArrays(
 
     for (int slot = 0; slot < total_links; ++slot) {
       const int cyl_idx = activeSlotToCylinderIndex(slot, num_links_ignore); // 1..dof
-      const auto& cyl = link_cylinders[cyl_idx];
+      const auto& cyl = link_meshes[cyl_idx];
       if (!cyl) return Status::Failure;
 
       Vec3 cp_obj, cp_link;
@@ -450,7 +458,7 @@ static Status computeContactArrays(
   if (check_self_collision) {
     for (int slot = 0; slot < total_links; ++slot) {
       const int cyl_idx1 = activeSlotToCylinderIndex(slot, num_links_ignore); // moving
-      const auto& link1 = link_cylinders[cyl_idx1];
+      const auto& link1 = link_meshes[cyl_idx1];
       if (!link1) return Status::Failure;
 
       const bool is_last = (slot == total_links - 1);
@@ -466,7 +474,7 @@ static Status computeContactArrays(
           if (obs_slot == slot - 1 || obs_slot == slot || obs_slot == slot + 1) continue;
         }
 
-        const auto& link2 = link_cylinders[cyl_idx2];
+        const auto& link2 = link_meshes[cyl_idx2];
         if (!link2) return Status::Failure;
 
         Vec3 cp2, cp1;
@@ -494,7 +502,7 @@ static Status computeContactArrays(
 
     const Vec3 p_link = (*contact_points_array_3x2)[slot].col(1); // point on robot link
     Eigen::MatrixXd Jp(3, link_index + 1);
-    const Status st = solver.pointJacobianPrefix(q, link_index, p_link, Jp);
+    const Status st = solver.pointJacobianUpToLink(q, link_index, p_link, Jp);
     if (!ok(st)) return st;
 
     (*j_contact_array_3xk)[static_cast<size_t>(slot)] = std::move(Jp);
@@ -508,7 +516,7 @@ static Status computeContactArrays(
       const Vec3 p_grasp = (*contact_points_array_3x2)[grasp_slot].col(1); // point on grasped object
       // Treat grasped object as attached to last joint: link_index = dof-1 => k=dof
       Eigen::MatrixXd Jp(3, dof);
-      const Status st = solver.pointJacobianPrefix(q, dof - 1, p_grasp, Jp);
+      const Status st = solver.pointJacobianUpToLink(q, dof - 1, p_grasp, Jp);
       if (!ok(st)) return st;
 
       (*j_contact_array_3xk)[static_cast<size_t>(grasp_slot)] = std::move(Jp);
@@ -532,8 +540,8 @@ Status computeContacts(
   if (q.size() != dof) return Status::InvalidParameter;
 
   if (opt.num_links_ignore < 0 || opt.num_links_ignore >= dof) return Status::InvalidParameter;
-  if (static_cast<int>(ctx.link_cylinders.size()) < dof + 1) {
-    log(LogLevel::Error, "computeContacts: link_cylinders size insufficient");
+  if (static_cast<int>(ctx.link_meshes.size()) < dof + 1) {
+    log(LogLevel::Error, "computeContacts: link_meshes size insufficient");
     return Status::InvalidParameter;
   }
 
@@ -546,7 +554,7 @@ Status computeContacts(
   const Status st = computeContactArrays(
       solver,
       q,
-      ctx.link_cylinders,
+      ctx.link_meshes,
       ctx.obstacles,
       ctx.grasped_object,
       opt.check_self_collision,

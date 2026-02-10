@@ -1,3 +1,14 @@
+// URDF serial-chain loader.
+//
+// Outline:
+// - Parse URDF, walk from tip -> base collecting parent joints, then reverse (base -> tip order).
+// - Convert URDF joint origins (xyz/rpy) into SE(3) transforms (URDF fixed-axis RPY convention).
+// - Express joint axes in the base_link space frame at q=0 and populate `core::JointSpec`.
+// - Compute `ee_home` as (base -> tip at q=0) * tool_offset, then initialize `ManipulatorModel`.
+//
+// Notes:
+// - `base_offset` supports only fixed joints above base_link; non-fixed parents are rejected.
+// - This loader intentionally targets a single chain (no branching).
 #include "sclerp/urdf/load_manipulator.hpp"
 
 #include "sclerp/core/common/logger.hpp"

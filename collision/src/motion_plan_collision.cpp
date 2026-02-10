@@ -1,3 +1,10 @@
+// Collision-aware motion planning loop.
+//
+// Mirrors `core::planMotionSclerp`, but after computing the RMRC step it:
+// - updates link mesh transforms from FK-all,
+// - computes closest contacts (environment + optional self-collision),
+// - runs `adjustJoints` to push q_next away from obstacles,
+// - then applies the same joint-limit backoff policy as core.
 #include "sclerp/collision/motion_plan_collision.hpp"
 #include "sclerp/collision/avoidance.hpp"
 
@@ -80,10 +87,9 @@ MotionPlanResult planMotionSclerpWithCollision(
     CollisionScene& scene,
     const CollisionMotionPlanOptions& opt) {
   MotionPlanResult out;
-  auto& link_meshes = scene.link_meshes;
+  const auto& link_meshes = scene.ctx.link_meshes;
   const auto& mesh_offset_transforms = scene.mesh_offset_transforms;
-  const auto& obstacles = scene.obstacles;
-  const auto& grasped_object = scene.grasped_object;
+  const auto& grasped_object = scene.ctx.grasped_object;
 
   const int n = solver.model().dof();
   if (n <= 0) {
@@ -263,8 +269,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       grasped_object->setTransform(g_tool.block<3,1>(0, 3), g_tool.block<3,3>(0, 0));
     }
 
-    const CollisionContext cctx{ link_meshes, obstacles, grasped_object };
-    st = computeContacts(solver, q, cctx, opt.query, &contacts);
+    st = computeContacts(solver, q, scene.ctx, opt.query, &contacts);
 
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerpWithCollision: computeContacts failed");

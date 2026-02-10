@@ -3,8 +3,12 @@
 
 namespace sclerp::core {
 
-// Refactored dual quaternion (const-correct, Transform-based).
-// Keeps the capability of DualQuat.h: from Transform/Matrix4, interpolate, pow, etc.
+// Dual quaternion representation of an SE(3) transform:
+//   dq = qr + eps * qd, with unit rotation quaternion `qr` and translation encoded in `qd`.
+//
+// This module is used for screw linear interpolation in task space:
+//   interpolate(a,b,t) = a * (a*^{-1} b)^t
+// where `pow(t)` implements the dual-quat power.
 class DualQuat {
 public:
   DualQuat();                             // identity

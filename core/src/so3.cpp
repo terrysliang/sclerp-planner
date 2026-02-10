@@ -1,3 +1,9 @@
+// SO(3) utilities.
+// - `expSO3` uses Rodrigues' formula with a small-angle series fallback.
+// - `logSO3` is numerically guarded near pi to avoid axis/angle instability.
+// - `rotationDistance(q1,q2)` is the quaternion chordal distance:
+//     min(||q1 - q2||, ||q1 + q2||)
+//   (useful for convergence checks; not the rotation angle in radians).
 #include "sclerp/core/math/so3.hpp"
 #include <algorithm>
 #include <cmath>

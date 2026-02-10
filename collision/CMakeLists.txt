@@ -90,10 +90,3 @@ if(SCLERP_BUILD_TESTS AND BUILD_TESTING)
   add_test(NAME sclerp_collision_unit_test COMMAND sclerp_collision_unit_test)
 endif()
 
-if(SCLERP_BUILD_BENCHMARKS)
-  add_executable(sclerp_collision_benchmark
-    bench/collision_benchmark.cpp
-  )
-  target_link_libraries(sclerp_collision_benchmark PRIVATE sclerp_collision)
-  target_compile_features(sclerp_collision_benchmark PRIVATE cxx_std_17)
-endif()

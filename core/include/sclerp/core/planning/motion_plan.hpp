@@ -7,6 +7,14 @@
 
 namespace sclerp::core {
 
+// Local motion planner that tracks an SE(3) ScLERP / dual-quat interpolation using RMRC.
+//
+// Sketch:
+// - Start from `q_init` (validated and FK'ed).
+// - Generate a small pose target step via dual-quat interpolation toward `g_f`.
+// - Use damped RMRC (`KinematicsSolver::rmrcIncrement`) to compute a joint increment.
+// - Back off the step size to satisfy joint limits.
+// This is a local method: it can fail/stall in difficult regions (limits/singularities/clutter).
 struct MotionPlanOptions {
   int max_iters = 10000;
   double q_init_tol = 0.0;

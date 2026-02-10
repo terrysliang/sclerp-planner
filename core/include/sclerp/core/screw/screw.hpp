@@ -5,6 +5,10 @@
 
 namespace sclerp::core {
 
+// SE(3) screw-motion helpers.
+// - `screwParameters` decomposes relative motion g_rel = g_i^{-1} g_f and classifies it under
+//   thresholds (no motion / pure translation / pure rotation / general screw).
+// - `sclerp` is the canonical SE(3) ScLERP curve: g(t) = g_i * exp(t * log(g_i^{-1} g_f)).
 enum class ScrewMotionType : std::uint8_t {
   NoMotion = 0,
   GeneralScrew = 1,

@@ -1,13 +1,17 @@
 #pragma once
 
 #include "sclerp/core/common/status.hpp"
-#include "sclerp/core/math/svd.hpp"
 #include "sclerp/collision/types.hpp"
 
 #include <Eigen/Dense>
 
 namespace sclerp::collision {
 
+// Collision avoidance step used by `planMotionSclerpWithCollision`.
+//
+// This implements a local, linearized correction: given a proposed step q -> q_next, we compute
+// closest contacts and solve a small LCP to find complementarity impulses that push the robot
+// away from obstacles to satisfy `distance >= safe_dist` when possible.
 struct CollisionAvoidanceOptions {
   // Hard boundary around obstacles (paper: col_tol / epsilon)
   double safe_dist = 0.005;

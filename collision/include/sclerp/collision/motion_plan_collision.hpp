@@ -9,6 +9,12 @@
 
 namespace sclerp::collision {
 
+// Collision-aware wrapper around `core::planMotionSclerp`.
+//
+// The structure mirrors the core planner loop, but inserts:
+// - kinematics -> mesh transform sync
+// - closest-contact extraction (FCL)
+// - LCP-based joint correction (`adjustJoints`)
 struct CollisionMotionPlanOptions {
   sclerp::core::MotionPlanOptions motion{};
   CollisionQueryOptions query{};
@@ -16,10 +22,8 @@ struct CollisionMotionPlanOptions {
 };
 
 struct CollisionScene {
-  std::vector<std::shared_ptr<FclObject>>& link_meshes;
+  const CollisionContext& ctx;
   const std::vector<sclerp::core::Mat4>& mesh_offset_transforms;
-  const std::vector<std::shared_ptr<FclObject>>& obstacles;
-  const std::shared_ptr<FclObject>& grasped_object;
 };
 
 sclerp::core::MotionPlanResult planMotionSclerpWithCollision(

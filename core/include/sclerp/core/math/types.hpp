@@ -4,6 +4,11 @@
 
 namespace sclerp::core {
 
+// Fundamental math types and conventions used across the library.
+// - `Transform` represents an SE(3) rigid transform (rotation + translation) and is composed by
+//   left-multiplication (A * B applies B, then A).
+// - `Twist` / `ScrewAxis` uses ordering [v; w] (linear; angular) in the world frame.
+// - Units are meters and radians.
 using Vec3 = Eigen::Vector3d;
 using Mat3 = Eigen::Matrix3d;
 using Mat4 = Eigen::Matrix4d;

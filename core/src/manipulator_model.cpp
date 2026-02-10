@@ -1,3 +1,7 @@
+// Manipulator model implementation.
+//
+// The core cache is `S_space` (6×n space screw axes, [v; w]) computed once from `JointSpec`.
+// This keeps FK/Jacobian evaluation in `KinematicsSolver` simple and fast.
 #include "sclerp/core/model/manipulator_model.hpp"
 
 #include "sclerp/core/common/logger.hpp"

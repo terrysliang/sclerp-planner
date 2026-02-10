@@ -10,6 +10,14 @@
 
 namespace sclerp::core {
 
+// Minimal serial-chain manipulator model for POE kinematics.
+//
+// Conventions:
+// - Joint axes/points are expressed in the base_link frame at q=0 (space frame).
+// - For revolute joints: `axis` is unit direction w and `point` is a point q on the axis.
+// - `joint_tip_home` is the home transform for that joint's tip frame (base -> tip at q=0).
+// - `ee_home` (M in POE) is the end-effector home transform (base -> tool at q=0).
+// - `S_space` caches the 6×n space screw axes with ordering [v; w].
 enum class JointType : std::uint8_t {
   Revolute = 0,
   Prismatic = 1,

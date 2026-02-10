@@ -1,3 +1,10 @@
+// Dual quaternion implementation for rigid transforms.
+//
+// Notes:
+// - `normalized()` ensures the real part is unit and canonicalizes sign (qr.w >= 0) for stability.
+// - `pow(t)` and `interpolate(a,b,t)` implement screw-like interpolation:
+//     interpolate(a,b,t) = a * (a*^{-1} b)^t
+// - This is used by the motion planners to generate smooth pose targets in SE(3).
 #include "sclerp/core/dual_quat/dual_quat.hpp"
 
 #include "sclerp/core/common/logger.hpp"

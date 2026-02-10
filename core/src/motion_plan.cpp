@@ -1,3 +1,8 @@
+// Local SE(3) ScLERP tracking planner (core).
+//
+// This planner is intentionally simple: it performs task-space interpolation toward `g_f`,
+// then uses RMRC to compute joint increments that track that target. It is not a global planner;
+// failure modes include joint limits, singularities, and local minima (stalling).
 #include "sclerp/core/planning/motion_plan.hpp"
 
 #include "sclerp/core/common/logger.hpp"
@@ -99,6 +104,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
     return out;
   }
   if (fk_mismatch) {
+    // Keep internal consistency: the planner trusts FK(q_init) as the true start state.
     if (shouldLog(LogLevel::Warn)) {
       std::ostringstream oss;
       oss << "g_i differs from FK(q_init) (dp=" << dp_fk << ", dr=" << dr_fk
@@ -184,6 +190,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
         return out;
       }
 
+      // Conservative backoff: shrink the step until a joint-limit-safe q_next exists.
       step_size /= 10.0;
     }
 

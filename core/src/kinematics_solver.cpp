@@ -1,3 +1,7 @@
+// Kinematics and differential kinematics (Jacobian) for `ManipulatorModel`.
+//
+// This file implements POE-style FK/Jacobians using the model's space screw axes, then
+// optionally applies a fixed `base_offset` to express results in the world frame.
 #include "sclerp/core/kinematics/kinematics_solver.hpp"
 
 #include "sclerp/core/common/logger.hpp"
@@ -154,24 +158,24 @@ Status KinematicsSolver::spatialJacobian(const Eigen::VectorXd& q,
 
 // 1) Space Jacobian prefix (VW ordering) for joints [0..link_index].
 //    Output is 6×(link_index+1). Columns are [v; w] in the space frame (after base_offset if any).
-Status KinematicsSolver::spatialJacobianPrefix(
+Status KinematicsSolver::spatialJacobianUpToLink(
     const Eigen::VectorXd& q,
     int link_index,
     Eigen::Ref<Eigen::MatrixXd> J_space_prefix) const {
 
   const int n = model_.dof();
   if (q.size() != n) {
-    log(LogLevel::Error, "spatialJacobianPrefix: q size mismatch");
+    log(LogLevel::Error, "spatialJacobianUpToLink: q size mismatch");
     return Status::InvalidParameter;
   }
   if (link_index < 0 || link_index >= n) {
-    log(LogLevel::Error, "spatialJacobianPrefix: link_index out of range");
+    log(LogLevel::Error, "spatialJacobianUpToLink: link_index out of range");
     return Status::InvalidParameter;
   }
 
   const int k = link_index + 1;
   if (J_space_prefix.rows() != 6 || J_space_prefix.cols() != k) {
-    log(LogLevel::Error, "spatialJacobianPrefix: output size mismatch (need 6×(link_index+1))");
+    log(LogLevel::Error, "spatialJacobianUpToLink: output size mismatch (need 6×(link_index+1))");
     return Status::InvalidParameter;
   }
 
@@ -199,7 +203,7 @@ Status KinematicsSolver::spatialJacobianPrefix(
 // 2) Contact-point linear Jacobian (prefix) for a point expressed in the same space/world frame.
 //    Output is 3×(link_index+1): p_dot = J_point_prefix * q_dot
 //    Using your [v; w] convention: p_dot = v + w×p = v - hat(p)*w.
-Status KinematicsSolver::pointJacobianPrefix(
+Status KinematicsSolver::pointJacobianUpToLink(
     const Eigen::VectorXd& q,
     int link_index,
     const Vec3& point_space,  // point position in the same "space" frame used by the Jacobian
@@ -207,23 +211,23 @@ Status KinematicsSolver::pointJacobianPrefix(
 
   const int n = model_.dof();
   if (q.size() != n) {
-    log(LogLevel::Error, "pointJacobianPrefix: q size mismatch");
+    log(LogLevel::Error, "pointJacobianUpToLink: q size mismatch");
     return Status::InvalidParameter;
   }
   if (link_index < 0 || link_index >= n) {
-    log(LogLevel::Error, "pointJacobianPrefix: link_index out of range");
+    log(LogLevel::Error, "pointJacobianUpToLink: link_index out of range");
     return Status::InvalidParameter;
   }
 
   const int k = link_index + 1;
   if (J_point_prefix.rows() != 3 || J_point_prefix.cols() != k) {
-    log(LogLevel::Error, "pointJacobianPrefix: output size mismatch (need 3×(link_index+1))");
+    log(LogLevel::Error, "pointJacobianUpToLink: output size mismatch (need 3×(link_index+1))");
     return Status::InvalidParameter;
   }
 
   // Compute prefix space Jacobian (6×k) then convert to point linear Jacobian (3×k).
   Eigen::MatrixXd J6(6, k);
-  const Status st = spatialJacobianPrefix(q, link_index, J6);
+  const Status st = spatialJacobianUpToLink(q, link_index, J6);
   if (!ok(st)) return st;
 
   const Eigen::MatrixXd Jv = J6.topRows(3);

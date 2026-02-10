@@ -1,3 +1,8 @@
+// SE(3) screw decomposition + SE(3) ScLERP primitive.
+//
+// `screwParameters` computes g_rel = g_i^{-1} g_f and classifies motion type under thresholds:
+// - NoMotion / PureTranslation / PureRotation / GeneralScrew
+// These parameters are used by the planners for step scheduling and diagnostics.
 #include "sclerp/core/screw/screw.hpp"
 
 #include "sclerp/core/common/logger.hpp"

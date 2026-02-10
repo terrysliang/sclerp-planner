@@ -8,7 +8,6 @@ add_library(sclerp_core
   src/se3.cpp
   src/adjoint.cpp
   src/distance.cpp
-  src/svd.cpp
   src/logger.cpp
   src/dual_quat.cpp
   src/screw.cpp

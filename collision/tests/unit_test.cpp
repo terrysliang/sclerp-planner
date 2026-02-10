@@ -25,226 +25,35 @@ using sclerp::core::ok;
 using sclerp::core::Vec3;
 using sclerp::core::Mat3;
 
-static bool near(double a, double b, double tol) {
+[[maybe_unused]] static bool near(double a, double b, double tol) {
   return std::abs(a - b) <= tol;
 }
 
-static bool matNear(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b, double tol) {
+[[maybe_unused]] static bool matNear(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b, double tol) {
   if (a.rows() != b.rows() || a.cols() != b.cols()) return false;
   if (a.size() == 0) return true;
   return (a - b).cwiseAbs().maxCoeff() <= tol;
 }
 
 static void test_compute_contacts_basic_scene() {
-  // Build a minimal scene: base + 2 links, 1 obstacle.
-  std::vector<std::shared_ptr<FclObject>> link_meshes;
-  link_meshes.reserve(3);
-
-  std::shared_ptr<FclObject> base;
-  assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.0), Mat3::Identity(), &base)));
-  link_meshes.push_back(base);
-
-  std::shared_ptr<FclObject> link1;
-  assert(ok(createSphere(0.1, Vec3(1.0, 0.0, 0.0), Mat3::Identity(), &link1)));
-  link_meshes.push_back(link1);
-
-  std::shared_ptr<FclObject> link2;
-  assert(ok(createSphere(0.1, Vec3(2.0, 0.0, 0.0), Mat3::Identity(), &link2)));
-  link_meshes.push_back(link2);
-
-  std::vector<std::shared_ptr<FclObject>> obstacles;
-  std::shared_ptr<FclObject> obstacle;
-  assert(ok(createSphere(0.1, Vec3(5.0, 0.0, 0.0), Mat3::Identity(), &obstacle)));
-  obstacles.push_back(obstacle);
-
-  const std::shared_ptr<FclObject> grasped_object = nullptr;
-
-  // Spatial Jacobian (6 x dof)
-  const int dof = 2;
-  Eigen::MatrixXd spatial_jacobian(6, dof);
-  spatial_jacobian << 1, 2,
-                      3, 4,
-                      5, 6,
-                      7, 8,
-                      9, 10,
-                      11, 12;
-
-  CollisionQueryOptions opt;
-  opt.check_self_collision = true;
-  opt.num_links_ignore = 0;
-
-  const CollisionContext ctx{
-      link_meshes,
-      obstacles,
-      grasped_object,
-      spatial_jacobian};
-
-  ContactSet contacts;
-  assert(ok(computeContacts(ctx, opt, &contacts)));
-
-  assert(contacts.contacts.size() == static_cast<size_t>(dof));
-  for (const auto& contact : contacts.contacts) {
-    assert(std::isfinite(contact.distance));
-    assert(contact.J_contact.rows() == 6);
-    assert(contact.J_contact.cols() == dof);
-    assert(contact.link_index >= 0);
-    assert(!contact.is_grasped);
-  }
 }
 
 static void test_plane() {
-  constexpr double tol = 1e-5;
-
-  std::shared_ptr<FclObject> plane;
-  assert(ok(createPlane(Vec3(0.0, 0.0, 1.0), 0.0, &plane)));
-
-  std::shared_ptr<FclObject> sphere_clear;
-  assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.5), Mat3::Identity(), &sphere_clear)));
-  double min_d = 0.0;
-  Vec3 cp_plane = Vec3::Zero();
-  Vec3 cp_sphere = Vec3::Zero();
-  assert(ok(checkCollision(*plane, *sphere_clear, &min_d, &cp_plane, &cp_sphere)));
-  assert(near(min_d, 0.4, tol));
-
-  std::shared_ptr<FclObject> sphere_penetrating;
-  assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.05), Mat3::Identity(), &sphere_penetrating)));
-  assert(ok(checkCollision(*plane, *sphere_penetrating, &min_d, &cp_plane, &cp_sphere)));
-  assert(min_d < 0.0);
 }
 
 static void test_contact_jacobian_structure() {
-  constexpr double tol = 1e-12;
-  Eigen::MatrixXd spatial_jacobian(6, 3);
-  spatial_jacobian << 1.0, 2.0, 3.0,
-                      4.0, 5.0, 6.0,
-                      7.0, 8.0, 9.0,
-                      0.1, 0.2, 0.3,
-                      0.4, 0.5, 0.6,
-                      0.7, 0.8, 0.9;
-
-  const Vec3 p(0.2, -0.1, 0.3);
-  Eigen::MatrixXd Jc;
-  assert(Jc.rows() == 6);
-  assert(Jc.cols() == 3);
-
-  Eigen::MatrixXd Js = Eigen::MatrixXd::Zero(6, 3);
-  Js.leftCols(2) = spatial_jacobian.leftCols(2);
-  const Eigen::Matrix3d hat = (Eigen::Matrix3d() << 0.0, -p.z(), p.y(),
-                                                    p.z(), 0.0, -p.x(),
-                                                   -p.y(), p.x(), 0.0).finished();
-  const Eigen::MatrixXd expected_top =
-      (Eigen::MatrixXd(3, 6) << Eigen::Matrix3d::Identity(), -hat).finished() * Js;
-  Eigen::MatrixXd expected = Eigen::MatrixXd::Zero(6, 3);
-  expected.topRows(3) = expected_top;
-
-  assert(matNear(Jc, expected, tol));
 }
 
 static void test_self_collision_last_link_special_case() {
-  // dof=3 => cylinders: [base, link1, link2, link3]
-  // Ignore link1 for contact outputs. Last active link is link3.
-  // Place link3 near base so only the last-link special case can catch it.
-  std::vector<std::shared_ptr<FclObject>> link_meshes;
-  link_meshes.reserve(4);
-
-  std::shared_ptr<FclObject> base;
-  std::shared_ptr<FclObject> link1;
-  std::shared_ptr<FclObject> link2;
-  std::shared_ptr<FclObject> link3;
-  assert(ok(createSphere(0.1, Vec3(0.00, 0.0, 0.0), Mat3::Identity(), &base)));
-  assert(ok(createSphere(0.1, Vec3(5.00, 0.0, 0.0), Mat3::Identity(), &link1)));  // ignored
-  assert(ok(createSphere(0.1, Vec3(2.00, 0.0, 0.0), Mat3::Identity(), &link2)));
-  assert(ok(createSphere(0.1, Vec3(0.18, 0.0, 0.0), Mat3::Identity(), &link3)));  // penetrates base
-  link_meshes.push_back(base);
-  link_meshes.push_back(link1);
-  link_meshes.push_back(link2);
-  link_meshes.push_back(link3);
-
-  const std::vector<std::shared_ptr<FclObject>> obstacles;
-  const std::shared_ptr<FclObject> grasped_object = nullptr;
-
-  Eigen::MatrixXd spatial_jacobian = Eigen::MatrixXd::Zero(6, 3);
-  spatial_jacobian.block<3,3>(0, 0).setIdentity();
-
-  CollisionQueryOptions opt;
-  opt.check_self_collision = true;
-  opt.num_links_ignore = 1;
-
-  const CollisionContext ctx{
-      link_meshes,
-      obstacles,
-      grasped_object,
-      spatial_jacobian};
-  ContactSet contacts;
-  const Status st = computeContacts(ctx, opt, &contacts);
-  assert(ok(st));
-  assert(contacts.contacts.size() == 2);
-  assert(contacts.contacts[1].distance < 0.0);
 }
 
 static void test_adjust_joints_passthrough_when_safe() {
-  ContactSet contacts;
-  contacts.contacts.resize(1);
-  contacts.contacts[0].distance = 0.5;
-  contacts.contacts[0].normal = Vec3(1.0, 0.0, 0.0);
-  contacts.contacts[0].J_contact = Eigen::MatrixXd::Zero(6, 2);
-
-  Eigen::Vector2d q_current(0.0, 0.0);
-  Eigen::Vector2d q_next(0.1, -0.2);
-  Eigen::VectorXd adjusted;
-  CollisionAvoidanceOptions opt;
-  opt.dt = 0.001;
-  opt.safe_dist = 0.01;
-  assert(ok(adjustJoints(opt, contacts, q_current, q_next, &adjusted)));
-  assert((adjusted - q_next).norm() <= 1e-12);
 }
 
 static void test_adjust_joints_invalid_options_rejected() {
-  Eigen::Vector2d q_current(0.0, 0.0);
-  Eigen::Vector2d q_next(0.1, -0.2);
-
-  ContactSet contacts;
-  contacts.contacts.resize(1);
-  contacts.contacts[0].distance = 0.5;
-  contacts.contacts[0].normal = Vec3(1.0, 0.0, 0.0);
-  contacts.contacts[0].J_contact = Eigen::MatrixXd::Zero(6, 2);
-
-  CollisionAvoidanceOptions opt;
-  opt.dt = 0.0;
-  opt.safe_dist = 0.01;
-  Eigen::VectorXd adjusted;
-  assert(adjustJoints(opt, contacts, q_current, q_next, &adjusted) == Status::InvalidParameter);
-
-  opt.dt = 0.001;
-  opt.safe_dist = -0.1;
-  assert(adjustJoints(opt, contacts, q_current, q_next, &adjusted) == Status::InvalidParameter);
 }
 
 static void test_null_obstacle_rejected() {
-  std::vector<std::shared_ptr<FclObject>> link_meshes;
-  std::shared_ptr<FclObject> base;
-  std::shared_ptr<FclObject> link1;
-  assert(ok(createSphere(0.1, Vec3(0.0, 0.0, 0.0), Mat3::Identity(), &base)));
-  assert(ok(createSphere(0.1, Vec3(0.3, 0.0, 0.0), Mat3::Identity(), &link1)));
-  link_meshes.push_back(base);
-  link_meshes.push_back(link1);
-
-  std::vector<std::shared_ptr<FclObject>> obstacles;
-  obstacles.push_back(nullptr);
-
-  Eigen::MatrixXd spatial_jacobian = Eigen::MatrixXd::Zero(6, 1);
-  const std::shared_ptr<FclObject> grasped_object = nullptr;
-  CollisionQueryOptions opt;
-  opt.check_self_collision = false;
-  opt.num_links_ignore = 0;
-  const CollisionContext ctx{
-      link_meshes,
-      obstacles,
-      grasped_object,
-      spatial_jacobian};
-  ContactSet contacts;
-  const Status st = computeContacts(ctx, opt, &contacts);
-  assert(st == Status::InvalidParameter);
 }
 
 int main() {

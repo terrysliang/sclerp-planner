@@ -15,6 +15,11 @@
 
 namespace sclerp::collision {
 
+// FCL-backed collision queries + contact extraction.
+//
+// The collision module assumes `link_meshes` includes base at index 0, followed by one mesh per
+// kinematic link. When the model exposes a tool frame, an additional tool mesh may be appended.
+// `mesh_offset_transforms` (in the planner wrapper) aligns meshes with the kinematic frames 1:1.
 using sclerp::core::Status;
 using sclerp::core::Vec3;
 using sclerp::core::Mat3;
@@ -105,7 +110,7 @@ Status createMeshFromSTL(const std::string& stl_path,
 Status buildLinkMeshes(const std::vector<std::string>& stl_files,
                        std::vector<std::shared_ptr<FclObject>>* out);
 
-Status updateLinkMeshTransforms(std::vector<std::shared_ptr<FclObject>>& link_meshes,
+Status updateLinkMeshTransforms(const std::vector<std::shared_ptr<FclObject>>& link_meshes,
                                 const std::vector<Mat4>& g_intermediate,
                                 // mesh_offset_transforms aligns 1:1 with link_meshes/g_intermediate (index 0 is base).
                                 const std::vector<Mat4>& mesh_offset_transforms);
@@ -117,7 +122,7 @@ Status checkCollision(const FclObject& obj1,
                       Vec3* contact_point_obj2);
 
 struct CollisionContext {
-  const std::vector<std::shared_ptr<FclObject>>& link_cylinders;  // includes base at index 0
+  const std::vector<std::shared_ptr<FclObject>>& link_meshes;  // includes base at index 0
   const std::vector<std::shared_ptr<FclObject>>& obstacles;
   const std::shared_ptr<FclObject>& grasped_object;
 };

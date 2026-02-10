@@ -9,6 +9,13 @@
 
 namespace sclerp::urdf {
 
+// URDF -> `core::ManipulatorModel` adapter.
+//
+// Scope/assumptions:
+// - Loads a single serial chain from `base_link` to `tip_link`.
+// - Supports revolute/continuous/prismatic/fixed joints along the chain.
+// - Fixed joints can be collapsed into the chain transforms (default) or kept as DOFs.
+// - Optional `tool_offset` lets callers define a tool frame on top of `tip_link` at q=0.
 struct LoadOptions {
   std::string base_link;
   std::string tip_link;

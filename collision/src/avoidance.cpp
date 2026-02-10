@@ -1,8 +1,13 @@
+// Collision avoidance correction via an LCP (complementarity) solve.
+//
+// High-level:
+// - Build a per-contact linear constraint using closest-point normals and point Jacobians.
+// - Solve an LCP for non-negative impulses z that activate only when constraints are tight.
+// - Map those impulses back into joint space via analytic pseudoinverses (3×3 solves).
 #include "sclerp/collision/avoidance.hpp"
 
 #include "sclerp/collision/lemke.hpp"
 #include "sclerp/core/common/logger.hpp"
-#include "sclerp/core/math/svd.hpp"
 
 #include <algorithm>
 
@@ -33,8 +38,8 @@ static Status pseudoInverseAnalytic3xk(
   return Status::Success;
 }
 
-// New version: expects normals as 3×nc and each J_contact is 3×k_i (k_i varies per contact).
-static Status adjustJointsFromArraysReduced(
+// expects normals as 3×nc and each J_contact is 3×k_i (k_i varies per contact).
+static Status adjustJointsFromArrays(
     double h,
     double safe_dist,
     double pinv_lambda,
@@ -217,7 +222,7 @@ Status adjustJoints(
     }
   }
 
-  return adjustJointsFromArraysReduced(
+  return adjustJointsFromArrays(
       opt.dt,
       safe_dist,
       opt.pinv_lambda,

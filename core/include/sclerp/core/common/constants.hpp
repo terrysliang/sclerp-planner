@@ -8,7 +8,6 @@ struct Thresholds {
   double no_motion_magnitude = 1.0e-5;         // unit depends on measure
 
   double axis_norm_eps = 1.0e-12;
-  double svd_tol = 1.0e-6;
 };
 
 inline constexpr Thresholds kDefaultThresholds{};

@@ -1,3 +1,7 @@
+// Lemke LCP solver (tableau pivoting).
+//
+// This is a pragmatic implementation intended for small problems (number of active contacts).
+// Failure modes include ray termination (no solution found) and unstable pivots.
 #include "sclerp/collision/lemke.hpp"
 
 #include "sclerp/core/common/logger.hpp"

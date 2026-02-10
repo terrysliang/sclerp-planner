@@ -1,3 +1,9 @@
+// SE(3) utilities built on SO(3) exp/log.
+//
+// Conventions:
+// - Twists are 6-vectors xi = [v; w] (linear; angular).
+// - `expSE3` uses the standard V-matrix formulation with small-angle series for stability.
+// - `logSE3` inverts V to recover v from translation.
 #include "sclerp/core/math/se3.hpp"
 #include "sclerp/core/math/types.hpp"
 #include <algorithm>
