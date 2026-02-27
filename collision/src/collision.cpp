@@ -87,8 +87,9 @@ CylinderObject::CylinderObject(double radius,
 
 MeshObject::MeshObject(const std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<double>>>& bvh_model,
                        const Vec3& position,
-                       const Mat3& orientation)
-  : FclObject(bvh_model, position, orientation) {}
+                       const Mat3& orientation,
+                       std::string stl_path)
+  : FclObject(bvh_model, position, orientation), stl_path_(std::move(stl_path)) {}
 
 PlaneObject::PlaneObject(const Vec3& normal, double offset)
   : FclObject(std::make_shared<fcl::Planed>(normal, offset),
@@ -213,7 +214,7 @@ Status createMeshFromSTL(const std::string& stl_path,
 
   const Vec3 position = transform.block<3,1>(0, 3);
   const Mat3 orientation = transform.block<3,3>(0, 0);
-  *out = std::make_shared<MeshObject>(bvh_model, position, orientation);
+  *out = std::make_shared<MeshObject>(bvh_model, position, orientation, stl_path);
   return Status::Success;
 }
 
@@ -469,7 +470,7 @@ static Status computeContactArrays(
             (obs_slot < 0) ? 0 : activeSlotToCylinderIndex(obs_slot, num_links_ignore);
         if (cyl_idx2 == cyl_idx1) continue;
 
-        // Skip adjacent links (same policy as your original; keep if you like)
+        // Skip adjacent links
         if (!is_last && obs_slot >= 0) {
           if (obs_slot == slot - 1 || obs_slot == slot || obs_slot == slot + 1) continue;
         }

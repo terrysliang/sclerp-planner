@@ -20,8 +20,8 @@ struct MotionPlanOptions {
   double q_init_tol = 0.0;
 
   // stop thresholds
-  double pos_tol = 5e-4;
-  double rot_tol = 5e-3;  // chordal distance (quat)
+  double pos_tol = 5e-4;  // meters
+  double rot_tol = 5e-3;  // quaternion chordal distance (not angle in radians)
 
   // motion schedule parameters
   double beta = 0.5;
@@ -40,13 +40,22 @@ struct MotionPlanOptions {
 };
 
 struct MotionPlanRequest {
+  // Initial joint configuration (size must match `solver.model().dof()`).
   Eigen::VectorXd q_init;
+
+  // Initial end-effector pose (base->tool). This is used as a sanity check:
+  // if it differs from FK(q_init), the planner will warn and internally trust FK(q_init).
   Transform g_i;
+
+  // Target end-effector pose (base->tool).
   Transform g_f;
 };
 
 struct MotionPlanResult {
+  // Overall status for the run. On success, `path.positions.back()` reaches the goal within tolerances.
   Status status{Status::Failure};
+
+  // Joint-space path (no timing). The first entry is always `q_init`.
   JointPath path;
   int iters{0};
 };

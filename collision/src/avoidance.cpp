@@ -161,7 +161,7 @@ static Status adjustJointsFromArrays(
     comp_joint_values.head(k) += dq_i;
   }
 
-  // Keep your existing safeguard
+  // Safeguard
   const double delta_norm = delta.norm();
   if (delta_norm > 0.0) {
     const double max_comp_norm = 3.0 * delta_norm;

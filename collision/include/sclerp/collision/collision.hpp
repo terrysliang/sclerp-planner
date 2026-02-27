@@ -67,8 +67,14 @@ public:
 class MeshObject : public FclObject {
 public:
   MeshObject(const std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<double>>>& bvh_model,
-               const Vec3& position,
-               const Mat3& orientation);
+             const Vec3& position,
+             const Mat3& orientation,
+             std::string stl_path = {});
+
+  const std::string& stlPath() const { return stl_path_; }
+
+private:
+  std::string stl_path_;
 };
 
 class PlaneObject : public FclObject {

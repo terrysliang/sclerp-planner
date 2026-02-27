@@ -80,7 +80,7 @@ Status screwParameters(const Transform& g_i,
 
   const Vec3 omega = w_se3 / th;
 
-  // Important: in our exp/log convention, v_se3 is scaled consistently with w_se3
+  // Important: in the exp/log convention, v_se3 is scaled consistently with w_se3
   // (i.e., both correspond to "twist * theta"), so pitch is:
   const double pitch = omega.dot(v_se3) / th;
 

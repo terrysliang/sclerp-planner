@@ -202,7 +202,7 @@ Status KinematicsSolver::spatialJacobianUpToLink(
 
 // 2) Contact-point linear Jacobian (prefix) for a point expressed in the same space/world frame.
 //    Output is 3×(link_index+1): p_dot = J_point_prefix * q_dot
-//    Using your [v; w] convention: p_dot = v + w×p = v - hat(p)*w.
+//    Using [v; w] convention: p_dot = v + w×p = v - hat(p)*w.
 Status KinematicsSolver::pointJacobianUpToLink(
     const Eigen::VectorXd& q,
     int link_index,

@@ -22,7 +22,11 @@ struct CollisionMotionPlanOptions {
 };
 
 struct CollisionScene {
+  // Collision objects for the robot + obstacles (and optionally a grasped object).
   const CollisionContext& ctx;
+
+  // Optional per-link mesh offsets that align STL meshes to the kinematic frames.
+  // Must be the same size as `ctx.link_meshes` when provided.
   const std::vector<sclerp::core::Mat4>& mesh_offset_transforms;
 };
 

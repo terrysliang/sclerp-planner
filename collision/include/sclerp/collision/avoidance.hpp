@@ -26,7 +26,6 @@ struct CollisionAvoidanceOptions {
   // Optional damping for analytic pseudo-inverse:
   // J^T (J J^T + lambda I)^-1, still “closed form” and only a 3×3 solve.
   double pinv_lambda = 1e-9;
-
 };
 
 sclerp::core::Status adjustJoints(
