@@ -4,13 +4,13 @@
 
 #include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/common/status.hpp"
-#include "sclerp/gazebo/obstacle_registry.hpp"
+#include "sclerp/gazebo/world_registry.hpp"
 
 using sclerp::core::LogLevel;
 using sclerp::core::Status;
 using sclerp::core::ok;
 using sclerp::core::setLogLevel;
-using sclerp::gazebo::ObstacleRegistry;
+using sclerp::gazebo::WorldRegistry;
 using sclerp::gazebo::RobotModelFromUrdf;
 using sclerp::gazebo::WorldExportOptions;
 
@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
     opt.primitive_resizer = sclerp::gazebo::PrimitiveResizerOptions{};
   }
 
-  ObstacleRegistry reg;
+  WorldRegistry reg;
   const Status st = reg.writeSdfWorld(out_path, opt);
   if (!ok(st)) {
     std::cerr << "Failed to write SDF world: " << out_path << "\n";
@@ -111,4 +111,3 @@ int main(int argc, char** argv) {
   std::cout << "Wrote: " << out_path << "\n";
   return 0;
 }
-

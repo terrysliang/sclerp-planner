@@ -1,4 +1,4 @@
-#include "sclerp/gazebo/obstacle_registry.hpp"
+#include "sclerp/gazebo/world_registry.hpp"
 
 #include "sclerp/core/common/logger.hpp"
 
@@ -34,10 +34,10 @@ static std::string sanitizeSdfName(std::string_view name) {
 
 }  // namespace
 
-Status ObstacleRegistry::registerObstacle(const std::shared_ptr<sclerp::collision::FclObject>& obstacle,
-                                         std::string name) {
+Status WorldRegistry::registerObstacle(const std::shared_ptr<sclerp::collision::FclObject>& obstacle,
+                                       std::string name) {
   if (!obstacle) {
-    log(LogLevel::Error, "ObstacleRegistry::registerObstacle: null obstacle");
+    log(LogLevel::Error, "WorldRegistry::registerObstacle: null obstacle");
     return Status::InvalidParameter;
   }
 
@@ -60,9 +60,9 @@ Status ObstacleRegistry::registerObstacle(const std::shared_ptr<sclerp::collisio
   return Status::Success;
 }
 
-Status ObstacleRegistry::removeObstacle(std::size_t index) {
+Status WorldRegistry::removeObstacle(std::size_t index) {
   if (index >= obstacles_.size()) {
-    log(LogLevel::Error, "ObstacleRegistry::removeObstacle: index out of range");
+    log(LogLevel::Error, "WorldRegistry::removeObstacle: index out of range");
     return Status::InvalidParameter;
   }
   obstacles_.erase(obstacles_.begin() + static_cast<std::ptrdiff_t>(index));
@@ -71,4 +71,3 @@ Status ObstacleRegistry::removeObstacle(std::size_t index) {
 }
 
 }  // namespace sclerp::gazebo
-

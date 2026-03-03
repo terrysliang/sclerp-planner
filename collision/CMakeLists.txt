@@ -19,6 +19,7 @@ endif()
 add_library(sclerp_collision
   src/avoidance.cpp
   src/collision.cpp
+  src/robot_link_meshes.cpp
   src/motion_plan_collision.cpp
   src/lemke.cpp
 )
@@ -89,4 +90,3 @@ if(SCLERP_BUILD_TESTS AND BUILD_TESTING)
 
   add_test(NAME sclerp_collision_unit_test COMMAND sclerp_collision_unit_test)
 endif()
-

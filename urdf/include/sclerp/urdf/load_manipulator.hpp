@@ -37,6 +37,19 @@ struct LoadResult {
   sclerp::core::Status status{sclerp::core::Status::Failure};
   sclerp::core::ManipulatorModel model;
   std::string message;  // optional debug info for caller
+
+  // Optional metadata for consumers that need to associate per-link data (e.g., collision meshes)
+  // with `KinematicsSolver::forwardKinematicsAll` outputs.
+  //
+  // Indexing matches FK-all:
+  // - index 0: base frame
+  // - indices 1..dof: per-joint tip frames
+  // - optional last index: tool frame (when model.has_tool_frame() is true)
+  std::vector<std::string> fk_frame_names;
+
+  // Optional mesh filename/URI hints for each frame in `fk_frame_names` (same indexing).
+  // Entries may be empty when no mesh is specified or the frame is synthetic.
+  std::vector<std::string> fk_frame_mesh_uris;
 };
 
 LoadResult loadManipulatorModelFromFile(const std::string& urdf_path,

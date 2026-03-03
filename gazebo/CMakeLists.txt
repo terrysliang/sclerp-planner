@@ -1,8 +1,8 @@
 include(CMakePackageConfigHelpers)
 
 add_library(sclerp_gazebo
-  src/obstacle_registry.cpp
-  src/obstacle_registry_io.cpp
+  src/world_registry.cpp
+  src/world_registry_io.cpp
   src/joint_trajectory_csv.cpp
 )
 add_library(sclerp::gazebo ALIAS sclerp_gazebo)

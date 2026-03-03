@@ -12,7 +12,7 @@
 #include "sclerp/core/common/status.hpp"
 #include "sclerp/core/math/types.hpp"
 #include "sclerp/core/path/joint_path.hpp"
-#include "sclerp/gazebo/obstacle_registry.hpp"
+#include "sclerp/gazebo/world_registry.hpp"
 
 using sclerp::collision::createBox;
 using sclerp::collision::createCylinder;
@@ -24,7 +24,7 @@ using sclerp::core::Mat4;
 using sclerp::core::Status;
 using sclerp::core::Vec3;
 using sclerp::core::ok;
-using sclerp::gazebo::ObstacleRegistry;
+using sclerp::gazebo::WorldRegistry;
 using sclerp::gazebo::RobotModelFromUrdf;
 using sclerp::gazebo::WorldExportOptions;
 using sclerp::gazebo::writeJointTrajectoryCsv;
@@ -51,7 +51,7 @@ static void writeAsciiStlTriangle(const std::string& path) {
 }
 
 static void test_exports() {
-  ObstacleRegistry reg;
+  WorldRegistry reg;
 
   std::shared_ptr<sclerp::collision::FclObject> box;
   assert(ok(createBox(Vec3(1.0, 2.0, 3.0), Vec3(0.1, 0.2, 0.3), Mat3::Identity(), &box)));
@@ -150,7 +150,7 @@ static void test_robot_from_urdf_inline_export() {
   writeAsciiStlTriangle(stl_link1);
   writeAsciiStlTriangle(stl_tool);
 
-  ObstacleRegistry reg;
+  WorldRegistry reg;
 
   WorldExportOptions opt;
   opt.include_ground_plane = false;
@@ -240,7 +240,7 @@ static void test_robot_from_urdf_mesh_dir_auto_discovery() {
   writeAsciiStlTriangle(stl_link1);
   writeAsciiStlTriangle(stl_tool);
 
-  ObstacleRegistry reg;
+  WorldRegistry reg;
 
   WorldExportOptions opt;
   opt.include_ground_plane = false;
@@ -320,7 +320,7 @@ static void test_sdf_import() {
 )";
   }
 
-  ObstacleRegistry reg;
+  WorldRegistry reg;
   assert(ok(reg.loadFromSdfWorld(sdf_path)));
   assert(reg.obstacles().size() == 2);
   assert(reg.obstacleNames().size() == 2);

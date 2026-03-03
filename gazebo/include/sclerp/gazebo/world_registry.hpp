@@ -14,9 +14,9 @@ namespace sclerp::gazebo {
 
 using sclerp::core::Status;
 
-// Simple registry that keeps obstacles in the same format required by the collision module,
-// while also tracking stable names for export.
-class ObstacleRegistry {
+// Registry that stores obstacle geometry (in the collision module's format), and can export/import
+// Gazebo SDF worlds (optionally including a robot and joint-trajectory playback plugin).
+class WorldRegistry {
 public:
   Status registerObstacle(const std::shared_ptr<sclerp::collision::FclObject>& obstacle,
                           std::string name = {});

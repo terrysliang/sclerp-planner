@@ -1,0 +1,44 @@
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(URDFDOM REQUIRED IMPORTED_TARGET urdfdom)
+pkg_check_modules(URDFDOM_HEADERS REQUIRED IMPORTED_TARGET urdfdom_headers)
+
+add_library(sclerp_examples_common STATIC
+  src/example_common.cpp
+)
+target_link_libraries(sclerp_examples_common
+  PUBLIC
+    sclerp_core
+    sclerp_urdf
+    sclerp_trajectory
+    sclerp_collision
+    sclerp_gazebo
+    PkgConfig::URDFDOM
+    PkgConfig::URDFDOM_HEADERS
+)
+target_compile_definitions(sclerp_examples_common
+  PUBLIC
+    SCLERP_EXAMPLES_ASSETS_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets\"
+)
+target_compile_features(sclerp_examples_common PUBLIC cxx_std_17)
+sclerp_target_warnings(sclerp_examples_common)
+
+add_executable(sclerp_example_1_no_obstacles_gazebo
+  src/example_1_no_obstacles_gazebo.cpp
+)
+target_link_libraries(sclerp_example_1_no_obstacles_gazebo PRIVATE sclerp_examples_common)
+target_compile_features(sclerp_example_1_no_obstacles_gazebo PRIVATE cxx_std_17)
+sclerp_target_warnings(sclerp_example_1_no_obstacles_gazebo)
+
+add_executable(sclerp_example_2_hardcoded_obstacles_gazebo
+  src/example_2_hardcoded_obstacles_gazebo.cpp
+)
+target_link_libraries(sclerp_example_2_hardcoded_obstacles_gazebo PRIVATE sclerp_examples_common)
+target_compile_features(sclerp_example_2_hardcoded_obstacles_gazebo PRIVATE cxx_std_17)
+sclerp_target_warnings(sclerp_example_2_hardcoded_obstacles_gazebo)
+
+add_executable(sclerp_example_3_scene_roundtrip_gazebo
+  src/example_3_scene_roundtrip_gazebo.cpp
+)
+target_link_libraries(sclerp_example_3_scene_roundtrip_gazebo PRIVATE sclerp_examples_common)
+target_compile_features(sclerp_example_3_scene_roundtrip_gazebo PRIVATE cxx_std_17)
+sclerp_target_warnings(sclerp_example_3_scene_roundtrip_gazebo)

@@ -1,4 +1,4 @@
-#include "sclerp/gazebo/obstacle_registry.hpp"
+#include "sclerp/gazebo/world_registry.hpp"
 
 #include "sclerp/core/common/logger.hpp"
 
@@ -882,7 +882,7 @@ static Status importGeometry(const sdf::Geometry& geom,
     const auto& n = pl->Normal();
     const Vec3 n_link(n.X(), n.Y(), n.Z());
     if (n_link.norm() <= 0.0 || !n_link.allFinite()) {
-      log(LogLevel::Error, "ObstacleRegistry::loadFromSdfWorld: invalid plane normal");
+      log(LogLevel::Error, "WorldRegistry::loadFromSdfWorld: invalid plane normal");
       return Status::InvalidParameter;
     }
     const Vec3 n_world = R * (n_link.normalized());
@@ -895,14 +895,14 @@ static Status importGeometry(const sdf::Geometry& geom,
     if (!mesh) return Status::Failure;
     const auto& sc = mesh->Scale();
     if (std::abs(sc.X() - 1.0) > 1e-12 || std::abs(sc.Y() - 1.0) > 1e-12 || std::abs(sc.Z() - 1.0) > 1e-12) {
-      log(LogLevel::Error, "ObstacleRegistry::loadFromSdfWorld: mesh <scale> is not supported (must be 1 1 1)");
+      log(LogLevel::Error, "WorldRegistry::loadFromSdfWorld: mesh <scale> is not supported (must be 1 1 1)");
       return Status::InvalidParameter;
     }
 
     const std::string uri = mesh->Uri();
     if (uri.rfind("model://", 0) == 0) {
       log(LogLevel::Error,
-          "ObstacleRegistry::loadFromSdfWorld: mesh URI uses model://; save the world with resources_use_absolute_paths=true");
+          "WorldRegistry::loadFromSdfWorld: mesh URI uses model://; save the world with resources_use_absolute_paths=true");
       return Status::InvalidParameter;
     }
 
@@ -910,7 +910,7 @@ static Status importGeometry(const sdf::Geometry& geom,
     return sclerp::collision::createMeshFromSTL(path, world_T_col, out);
   }
 
-  log(LogLevel::Error, "ObstacleRegistry::loadFromSdfWorld: unsupported geometry type");
+  log(LogLevel::Error, "WorldRegistry::loadFromSdfWorld: unsupported geometry type");
   return Status::InvalidParameter;
 }
 
@@ -924,10 +924,10 @@ static std::string sdfErrorsToString(const sdf::Errors& errs) {
 
 }  // namespace
 
-Status ObstacleRegistry::writeJson(const std::string& json_path) const {
+Status WorldRegistry::writeJson(const std::string& json_path) const {
   std::ofstream out(json_path);
   if (!out) {
-    log(LogLevel::Error, "ObstacleRegistry::writeJson: failed to open output file");
+    log(LogLevel::Error, "WorldRegistry::writeJson: failed to open output file");
     return Status::Failure;
   }
 
@@ -938,7 +938,7 @@ Status ObstacleRegistry::writeJson(const std::string& json_path) const {
 
   for (std::size_t i = 0; i < obstacles_.size(); ++i) {
     if (!obstacles_[i]) {
-      log(LogLevel::Error, "ObstacleRegistry::writeJson: null obstacle entry");
+      log(LogLevel::Error, "WorldRegistry::writeJson: null obstacle entry");
       return Status::Failure;
     }
 
@@ -993,10 +993,10 @@ Status ObstacleRegistry::writeJson(const std::string& json_path) const {
   return Status::Success;
 }
 
-Status ObstacleRegistry::writeSdfWorld(const std::string& sdf_path, const WorldExportOptions& opt) const {
+Status WorldRegistry::writeSdfWorld(const std::string& sdf_path, const WorldExportOptions& opt) const {
   std::ofstream out(sdf_path);
   if (!out) {
-    log(LogLevel::Error, "ObstacleRegistry::writeSdfWorld: failed to open output file");
+    log(LogLevel::Error, "WorldRegistry::writeSdfWorld: failed to open output file");
     return Status::Failure;
   }
 
@@ -1053,7 +1053,7 @@ Status ObstacleRegistry::writeSdfWorld(const std::string& sdf_path, const WorldE
   }
 
   if (opt.robot && opt.robot_from_urdf) {
-    log(LogLevel::Error, "ObstacleRegistry::writeSdfWorld: set only one of robot or robot_from_urdf");
+    log(LogLevel::Error, "WorldRegistry::writeSdfWorld: set only one of robot or robot_from_urdf");
     return Status::InvalidParameter;
   }
 
@@ -1081,16 +1081,16 @@ Status ObstacleRegistry::writeSdfWorld(const std::string& sdf_path, const WorldE
 
   if (opt.joint_trajectory) {
     if (!robot_name_for_plugin) {
-      log(LogLevel::Error, "ObstacleRegistry::writeSdfWorld: joint_trajectory requires a robot (robot or robot_from_urdf)");
+      log(LogLevel::Error, "WorldRegistry::writeSdfWorld: joint_trajectory requires a robot (robot or robot_from_urdf)");
       return Status::InvalidParameter;
     }
     const auto& jt = *opt.joint_trajectory;
     if (jt.csv_path.empty()) {
-      log(LogLevel::Error, "ObstacleRegistry::writeSdfWorld: joint_trajectory csv_path is empty");
+      log(LogLevel::Error, "WorldRegistry::writeSdfWorld: joint_trajectory csv_path is empty");
       return Status::InvalidParameter;
     }
     if (!(jt.rate > 0.0) || !std::isfinite(jt.rate)) {
-      log(LogLevel::Error, "ObstacleRegistry::writeSdfWorld: joint_trajectory rate must be > 0");
+      log(LogLevel::Error, "WorldRegistry::writeSdfWorld: joint_trajectory rate must be > 0");
       return Status::InvalidParameter;
     }
 
@@ -1125,7 +1125,7 @@ Status ObstacleRegistry::writeSdfWorld(const std::string& sdf_path, const WorldE
 
   for (std::size_t i = 0; i < obstacles_.size(); ++i) {
     if (!obstacles_[i]) {
-      log(LogLevel::Error, "ObstacleRegistry::writeSdfWorld: null obstacle entry");
+      log(LogLevel::Error, "WorldRegistry::writeSdfWorld: null obstacle entry");
       return Status::Failure;
     }
 
@@ -1136,7 +1136,7 @@ Status ObstacleRegistry::writeSdfWorld(const std::string& sdf_path, const WorldE
 
     // Mesh URIs are required for visualization.
     if (geom.kind == GeometrySpec::Kind::Mesh && geom.mesh_uri.empty()) {
-      log(LogLevel::Error, "ObstacleRegistry::writeSdfWorld: mesh obstacle is missing STL path");
+      log(LogLevel::Error, "WorldRegistry::writeSdfWorld: mesh obstacle is missing STL path");
       return Status::InvalidParameter;
     }
 
@@ -1169,9 +1169,9 @@ Status ObstacleRegistry::writeSdfWorld(const std::string& sdf_path, const WorldE
   return Status::Success;
 }
 
-Status ObstacleRegistry::loadFromSdfWorld(const std::string& sdf_path, const SdfWorldImportOptions& opt) {
+Status WorldRegistry::loadFromSdfWorld(const std::string& sdf_path, const SdfWorldImportOptions& opt) {
   if (sdf_path.empty()) {
-    log(LogLevel::Error, "ObstacleRegistry::loadFromSdfWorld: sdf_path is empty");
+    log(LogLevel::Error, "WorldRegistry::loadFromSdfWorld: sdf_path is empty");
     return Status::InvalidParameter;
   }
 
@@ -1179,7 +1179,7 @@ Status ObstacleRegistry::loadFromSdfWorld(const std::string& sdf_path, const Sdf
   const sdf::Errors errors = root.Load(sdf_path);
   if (!errors.empty()) {
     std::ostringstream oss;
-    oss << "ObstacleRegistry::loadFromSdfWorld: failed to load SDF world:\n";
+    oss << "WorldRegistry::loadFromSdfWorld: failed to load SDF world:\n";
     oss << sdfErrorsToString(errors);
     log(LogLevel::Error, oss.str());
     return Status::Failure;
@@ -1188,7 +1188,7 @@ Status ObstacleRegistry::loadFromSdfWorld(const std::string& sdf_path, const Sdf
   const sdf::World* world = nullptr;
   if (root.WorldCount() > 0) world = root.WorldByIndex(0);
   if (!world) {
-    log(LogLevel::Error, "ObstacleRegistry::loadFromSdfWorld: no <world> in SDF");
+    log(LogLevel::Error, "WorldRegistry::loadFromSdfWorld: no <world> in SDF");
     return Status::Failure;
   }
 
@@ -1250,7 +1250,7 @@ Status ObstacleRegistry::loadFromSdfWorld(const std::string& sdf_path, const Sdf
         const Status st = importGeometry(*geom, world_T_col, &obj);
         if (!ok(st)) return st;
         if (!obj) {
-          log(LogLevel::Error, "ObstacleRegistry::loadFromSdfWorld: failed to create obstacle");
+          log(LogLevel::Error, "WorldRegistry::loadFromSdfWorld: failed to create obstacle");
           return Status::Failure;
         }
         obj->computeAABB();

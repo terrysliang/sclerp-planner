@@ -1,9 +1,10 @@
 # sclerp-planner
 ScLERP-based motion planning stack with collision avoidance.
 
-This repo is split into four modules:
+This repo is split into five modules:
 - `core/`: Dual quaternions, POE kinematics, RMRC, and a local SE(3) ScLERP tracking planner (`planMotionSclerp`).
 - `urdf/`: Loads a serial chain from URDF into the minimal `core::ManipulatorModel`.
+- `trajectory/`: Time-parameterizes a joint-space path into an executable trajectory (samples of `t,q,qd,qdd`).
 - `collision/`: Wraps the core planner with FCL-based closest-contact queries and an LCP-based
   joint correction step (`planMotionSclerpWithCollision`).
 - `gazebo/` (optional): Registers obstacles and exports a parseable scene file + Gazebo world,
@@ -13,14 +14,14 @@ This repo is split into four modules:
 
 This is a C++17 / CMake (>= 3.20) project.
 
-Default build (`core` + `urdf`):
+Default build (`core` + `urdf` + `trajectory`):
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
 ```
 
-Tip: if you only want the math/kinematics/planner pieces (no URDF parsing), build just `core`:
+Tip: if you only want the math/kinematics/planner pieces (no URDF parsing), disable `urdf`:
 
 ```bash
 cmake -S . -B build -DSCLERP_BUILD_URDF=OFF
@@ -30,15 +31,53 @@ cmake --build build -j
 Common toggles:
 - `SCLERP_BUILD_CORE=ON|OFF`
 - `SCLERP_BUILD_URDF=ON|OFF` (requires `urdfdom`)
+- `SCLERP_BUILD_TRAJECTORY=ON|OFF`
 - `SCLERP_BUILD_COLLISION=ON|OFF` (requires FCL + Assimp + Boost)
 - `SCLERP_BUILD_GAZEBO=ON|OFF` (requires `SCLERP_BUILD_COLLISION=ON`, plus `sdformat12` + `urdfdom`)
 - `SCLERP_BUILD_TESTS=ON|OFF`
+- `SCLERP_BUILD_EXAMPLES=ON|OFF` (requires `SCLERP_BUILD_GAZEBO=ON`)
 
 Run tests (when enabled):
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
+
+## Examples (out-of-the-box)
+
+The example executables under `examples/` bundle a small Diana7 robot asset set (URDF + simplified STL link meshes),
+so you can run them without providing your own URDF/meshes.
+
+Build:
+
+```bash
+cmake -S . -B build-examples -DSCLERP_BUILD_COLLISION=ON -DSCLERP_BUILD_GAZEBO=ON -DSCLERP_BUILD_EXAMPLES=ON
+cmake --build build-examples -j
+```
+
+Run (no args; uses bundled assets by default):
+
+```bash
+./build-examples/examples/sclerp_example_1_no_obstacles_gazebo
+./build-examples/examples/sclerp_example_2_hardcoded_obstacles_gazebo
+./build-examples/examples/sclerp_example_3_scene_roundtrip_gazebo
+```
+
+Example 3 can also import a planning scene from an existing Gazebo world SDF (for example saved via the
+`WorldSdfSaver` system plugin) and plan against the imported obstacles:
+
+```bash
+./build-examples/examples/sclerp_example_3_scene_roundtrip_gazebo --scene-world /abs/path/to/world_saved.sdf
+```
+
+Override the start joint configuration:
+
+```bash
+./build-examples/examples/sclerp_example_1_no_obstacles_gazebo \
+  --q-init "1.88857, 0.167132, 0.0285466, 2.4741, -0.327457, -0.52395, 2.23218"
+```
+
+To use your own robot, pass `--urdf`, `--stl-dir`, `--base-link`, and `--tip-link` (all required if any are set).
 
 ## Minimal usage (core + urdf)
 
@@ -81,6 +120,51 @@ joint correction step. You provide:
 - per-link STL meshes (base at index 0), plus optional per-link mesh offsets
 - obstacle objects (boxes/spheres/cylinders/planes/meshes)
 
+## Trajectory generation
+
+The core planner returns a `JointPath` (positions only). To make it executable on a controller (or to export a
+time-stamped CSV), use the `trajectory` module to generate samples of `{t, q, qd, qdd}` under joint limits.
+
+Built-in options are provided:
+- `sclerp::trajectory::GridTotg` (grid-based forward/backward time parameterization)
+- `sclerp::trajectory::planWithToppra` (optional TOPPRA backend; time-optimal parameterization with v/a limits)
+
+Minimal pattern:
+
+```cpp
+#include "sclerp/trajectory/interpolator.hpp"
+
+sclerp::trajectory::Limits lim;
+lim.v_max = Eigen::VectorXd::Constant(solver.model().dof(), 1.0);
+lim.a_max = Eigen::VectorXd::Constant(solver.model().dof(), 2.0);
+
+const auto unwrap = sclerp::trajectory::continuousRevoluteMask(solver.model());
+
+sclerp::trajectory::GridTotg gen(lim);
+sclerp::trajectory::PlannedTrajectory traj;
+gen.plan(result.path, /*sample_dt=*/0.01, &traj, unwrap);
+
+sclerp::trajectory::writeTrajectoryCsv(traj, "traj.csv");
+```
+
+### TOPPRA backend (optional)
+
+If you have TOPPRA installed, `trajectory` can optionally enable a TOPPRA-based time parameterization backend.
+At configure time, CMake must be able to resolve `find_package(toppra)`. If TOPPRA isn't found, the project
+still builds, but `planWithToppra(...)` will return `Status::Failure`.
+
+Common configure patterns:
+
+```bash
+cmake -S . -B build -DSCLERP_TRAJECTORY_WITH_TOPPRA=ON -DCMAKE_PREFIX_PATH=/abs/path/to/toppra/prefix
+```
+
+or:
+
+```bash
+cmake -S . -B build -DSCLERP_TRAJECTORY_WITH_TOPPRA=ON -Dtoppra_DIR=/abs/path/to/toppra/lib/cmake/toppra
+```
+
 ## Gazebo export (optional)
 
 Enable the module:
@@ -98,9 +182,10 @@ cmake -S . -B build -DSCLERP_BUILD_COLLISION=ON -DSCLERP_BUILD_GAZEBO=ON -DSCLER
 cmake --build build -j
 ```
 
-In code, use `sclerp::gazebo::ObstacleRegistry` to register obstacles (FCL objects) and export:
-- `ObstacleRegistry::writeJson("scene.json")` exports a simple parseable JSON scene.
-- `ObstacleRegistry::writeSdfWorld("world.sdf", opt)` writes an SDF world with the obstacles, plus either:
+In code, use `sclerp::gazebo::WorldRegistry` (include `sclerp/gazebo/world_registry.hpp`) to register obstacles (FCL objects) and export:
+
+- `WorldRegistry::writeJson("scene.json")` exports a simple parseable JSON scene.
+- `WorldRegistry::writeSdfWorld("world.sdf", opt)` writes an SDF world with the obstacles, plus either:
   - `WorldExportOptions::robot_from_urdf` (inline robot generated from URDF + per-link STL meshes), or
   - `WorldExportOptions::robot` (include an existing Gazebo model / SDF).
 - `sclerp::gazebo::writeJointTrajectoryCsv(path, dt, "trajectory.csv")` writes `time,<joint...>` CSV compatible with the plugin.
@@ -152,7 +237,7 @@ export IGN_GAZEBO_SYSTEM_PLUGIN_PATH="$PWD/build/gazebo:${IGN_GAZEBO_SYSTEM_PLUG
 ign gazebo "$PWD/world.sdf"
 ```
 
-Note: `world.sdf` is not checked into this repo — it must be generated by your application (for example via `ObstacleRegistry::writeSdfWorld("world.sdf", opt)`).
+Note: `world.sdf` is not checked into this repo — it must be generated by your application (for example via `WorldRegistry::writeSdfWorld("world.sdf", opt)`).
 
 If `ign gazebo` prints `Unable to find or download file`, it typically means the world file path (or a referenced mesh URI) can’t be resolved. Use an absolute path for the world file (as above) and absolute STL paths (the exporter will write `file://...` URIs for absolute paths).
 
@@ -204,9 +289,28 @@ ign service -s /world/sclerp_world/sclerp/save_world_sdf \
 Then load obstacles back into the planner:
 
 ```cpp
-sclerp::gazebo::ObstacleRegistry reg;
+sclerp::gazebo::WorldRegistry reg;
 reg.loadFromSdfWorld("world_saved.sdf");  // imports static models (ignores "ground_plane" and "robot" by default)
 ```
+
+## Examples
+
+This repo includes small end-to-end examples that:
+1) plan (with / without obstacles),
+2) time-parameterize into a sampled trajectory,
+3) export `world.sdf` + `trajectory.csv` for Gazebo Sim 6 playback.
+
+Build:
+
+```bash
+cmake -S . -B build -DSCLERP_BUILD_COLLISION=ON -DSCLERP_BUILD_GAZEBO=ON -DSCLERP_BUILD_EXAMPLES=ON
+cmake --build build -j
+```
+
+Executables:
+- `./build/examples/sclerp_example_1_no_obstacles_gazebo`
+- `./build/examples/sclerp_example_2_hardcoded_obstacles_gazebo`
+- `./build/examples/sclerp_example_3_scene_roundtrip_gazebo`
 
 ## Conventions
 

@@ -77,6 +77,39 @@ static bool isMovableJointType(decltype(::urdf::Joint().type) t) {
          t == ::urdf::Joint::PRISMATIC;
 }
 
+static std::string urdfMeshFilenameFromGeometry(const ::urdf::GeometrySharedPtr& geom) {
+  if (!geom) return {};
+  if (geom->type != ::urdf::Geometry::MESH) return {};
+  const auto* mesh = dynamic_cast<const ::urdf::Mesh*>(geom.get());
+  if (!mesh) return {};
+  return mesh->filename;
+}
+
+static std::string urdfMeshFilenameForLinkPreferCollision(const ::urdf::LinkConstSharedPtr& link) {
+  if (!link) return {};
+
+  // Prefer collision geometry (closer to what collision checkers typically want), fall back to visual.
+  if (link->collision) {
+    const std::string f = urdfMeshFilenameFromGeometry(link->collision->geometry);
+    if (!f.empty()) return f;
+  }
+  for (const auto& c : link->collision_array) {
+    const std::string f = c ? urdfMeshFilenameFromGeometry(c->geometry) : std::string{};
+    if (!f.empty()) return f;
+  }
+
+  if (link->visual) {
+    const std::string f = urdfMeshFilenameFromGeometry(link->visual->geometry);
+    if (!f.empty()) return f;
+  }
+  for (const auto& v : link->visual_array) {
+    const std::string f = v ? urdfMeshFilenameFromGeometry(v->geometry) : std::string{};
+    if (!f.empty()) return f;
+  }
+
+  return {};
+}
+
 static bool isIdentityTransform(const Transform& T, double tol = 1e-9) {
   return T.isApprox(Transform::Identity(), tol);
 }
@@ -254,6 +287,36 @@ LoadResult loadManipulatorModelFromString(const std::string& urdf_xml,
   std::vector<JointSpec> joints;
   joints.reserve(joints_tip_to_base.size());
 
+  // Build frame/link metadata aligned with FK-all output indexing.
+  std::vector<std::string> fk_frame_names;
+  std::vector<std::string> fk_frame_mesh_uris;
+  fk_frame_names.reserve(1 + joints_tip_to_base.size() + 1);
+  fk_frame_mesh_uris.reserve(1 + joints_tip_to_base.size() + 1);
+
+  const auto pushFrame = [&](const std::string& link_name) {
+    fk_frame_names.push_back(link_name);
+    const ::urdf::LinkConstSharedPtr link = model->getLink(link_name);
+    fk_frame_mesh_uris.push_back(link ? urdfMeshFilenameForLinkPreferCollision(link) : std::string{});
+  };
+
+  pushFrame(opt.base_link);
+
+  for (const auto& j : joints_tip_to_base) {
+    if (!j) continue;
+    if (opt.collapse_fixed_joints && j->type == ::urdf::Joint::FIXED) continue;
+    pushFrame(j->child_link_name);
+  }
+
+  if (has_tool_frame) {
+    if (has_tool_offset) {
+      fk_frame_names.push_back(opt.tip_link + "_tool");
+      fk_frame_mesh_uris.push_back({});
+    } else {
+      // Tool frame corresponds to the URDF `tip_link` (typically due to fixed joints after last movable joint).
+      pushFrame(opt.tip_link);
+    }
+  }
+
   Transform T_base_parent = Transform::Identity();  // base_link frame is identity by definition
 
   for (const auto& j : joints_tip_to_base) {
@@ -373,6 +436,8 @@ LoadResult loadManipulatorModelFromString(const std::string& urdf_xml,
   res.status = Status::Success;
   res.model = std::move(out_model);
   res.message = "OK";
+  res.fk_frame_names = std::move(fk_frame_names);
+  res.fk_frame_mesh_uris = std::move(fk_frame_mesh_uris);
   return res;
 }
 
