@@ -13,6 +13,8 @@ namespace sclerp::core {
 // - Start from `q_init` (validated and FK'ed).
 // - Generate a small pose target step via dual-quat interpolation toward `g_f`.
 // - Use damped RMRC (`KinematicsSolver::rmrcIncrement`) to compute a joint increment.
+//   When enabled via `MotionPlanOptions::rmrc.nullspace`, RMRC can add a task-priority nullspace
+//   term for redundant manipulators (dof > 6) to avoid joint limits and/or track a nominal posture.
 // - Back off the step size to satisfy joint limits.
 // This is a local method: it can fail/stall in difficult regions (limits/singularities/clutter).
 struct MotionPlanOptions {

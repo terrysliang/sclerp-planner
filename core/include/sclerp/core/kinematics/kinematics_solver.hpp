@@ -7,6 +7,7 @@
 #include "sclerp/core/dual_quat/dual_quat.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace sclerp::core {
@@ -27,6 +28,47 @@ struct RmrcOptions {
   RmrcDamping damping{RmrcDamping::Adaptive};
   double lambda{5e-2};     // constant damping or max damping for adaptive
   double sigma_min{2e-2};  // adaptive threshold for smallest singular value
+
+  // Optional task-priority nullspace term for redundant manipulators.
+  //
+  // When enabled (and dof > 6), `rmrcIncrement(...)` computes:
+  //   dq = dq_primary + N * dq_secondary
+  // where:
+  //   dq_primary   := damped least-squares RMRC step (existing behavior)
+  //   N            := I - J^T (J J^T + lambda^2 I)^{-1} J  (damped nullspace projector)
+  //   dq_secondary := weighted sum of:
+  //     - joint-limit avoidance (push toward mid-range near limits)
+  //     - nominal posture tracking (push toward q_nominal, defaulting to mid-range)
+  struct RmrcNullspaceJointLimitOptions {
+    bool enabled{false};
+    double weight{1.0};
+    // Activate in the last `margin_frac` fraction of joint range near each limit.
+    // Example: 0.10 -> ramps on in the last 10% of (upper-lower) near each bound.
+    double margin_frac{0.10};
+  };
+
+  struct RmrcNullspacePostureOptions {
+    bool enabled{false};
+    double weight{0.10};
+    // If unset, defaults to per-joint mid-range when limits are enabled; otherwise equals q_current.
+    std::optional<Eigen::VectorXd> q_nominal{};
+  };
+
+  struct RmrcNullspaceOptions {
+    bool enabled{false};
+    double gain{1.0};
+
+    // Clamp only the nullspace contribution (after projection + gain).
+    double max_joint_step_frac{0.05};  // fraction of (upper-lower) when limits enabled
+    double max_joint_step_abs{0.25};   // absolute clamp when limits disabled
+    double max_norm_ratio{0.50};       // ||dq_null|| <= max_norm_ratio*(||dq_primary|| + 1e-9)
+    double max_norm_abs{0.50};         // absolute norm cap for dq_null
+
+    RmrcNullspaceJointLimitOptions joint_limits{};
+    RmrcNullspacePostureOptions posture{};
+  };
+
+  RmrcNullspaceOptions nullspace{};
 };
 
 class SCLERP_CORE_API KinematicsSolver {

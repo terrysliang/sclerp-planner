@@ -11,6 +11,7 @@
 #include <Eigen/Geometry>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace sclerp::core {
 
@@ -348,7 +349,162 @@ Status KinematicsSolver::rmrcIncrement(const DualQuat& dq_i,
   const Eigen::Matrix<double, 7, 1> dgamma = (gamma_f - gamma_i);
   const Eigen::Matrix<double, 6, 1> y = X * dgamma;
 
-  dq->noalias() = s_jac.transpose() * y;
+  const Eigen::VectorXd dq_primary = (s_jac.transpose() * y).eval();
+
+  Eigen::VectorXd dq_total = dq_primary;
+
+  // Optional nullspace term for redundant manipulators (dof > 6).
+  const bool ns_enabled = opt.nullspace.enabled &&
+                          (opt.nullspace.joint_limits.enabled || opt.nullspace.posture.enabled);
+  if (ns_enabled) {
+    int movable = 0;
+    for (int i = 0; i < n; ++i) {
+      if (model_.joint(i).type != JointType::Fixed) ++movable;
+    }
+
+    if (movable > 6) {
+      Eigen::VectorXd z = Eigen::VectorXd::Zero(n);
+
+      // ---- joint-limit avoidance ----
+      if (opt.nullspace.joint_limits.enabled) {
+        const double w_lim = opt.nullspace.joint_limits.weight;
+        const double m_in = opt.nullspace.joint_limits.margin_frac;
+        const double m = std::clamp(m_in, 0.0, 0.49);
+
+        for (int i = 0; i < n; ++i) {
+          const JointSpec& j = model_.joint(i);
+          if (j.type == JointType::Fixed) continue;
+
+          const JointLimit& lim = j.limit;
+          if (!lim.enabled) continue;
+          const double range = lim.upper - lim.lower;
+          if (!(range > 1e-9) || !std::isfinite(range)) continue;
+
+          const double mid = 0.5 * (lim.lower + lim.upper);
+          const double half = 0.5 * range;
+          if (!(half > 0.0) || !std::isfinite(half)) continue;
+
+          const double qi = q_current(i);
+          const double x = (qi - mid) / half;
+          const double absx = std::abs(x);
+
+          double w_act = 0.0;
+          if (m <= 0.0) {
+            w_act = 1.0;
+          } else {
+            const double x0 = 1.0 - 2.0 * m;
+            if (absx > x0) {
+              const double denom = std::max(1e-12, 1.0 - x0);  // = 2m
+              w_act = std::clamp((absx - x0) / denom, 0.0, 1.0);
+            }
+          }
+
+          if (!(w_act > 0.0)) continue;
+
+          const double grad = 2.0 * (qi - mid) / (half * half);
+          z(i) += -w_lim * w_act * grad;
+        }
+      }
+
+      // ---- nominal posture tracking ----
+      Eigen::VectorXd q_nominal;
+      if (opt.nullspace.posture.enabled) {
+        if (opt.nullspace.posture.q_nominal.has_value()) {
+          const Eigen::VectorXd& qn = opt.nullspace.posture.q_nominal.value();
+          if (qn.size() != n) {
+            log(LogLevel::Error, "rmrcIncrement: q_nominal size mismatch");
+            return Status::InvalidParameter;
+          }
+          q_nominal = qn;
+        } else {
+          // Default: mid-range for limited joints; otherwise current (no contribution).
+          q_nominal = q_current;
+          for (int i = 0; i < n; ++i) {
+            const JointSpec& j = model_.joint(i);
+            if (j.type == JointType::Fixed) continue;
+
+            const JointLimit& lim = j.limit;
+            if (!lim.enabled) continue;
+            const double range = lim.upper - lim.lower;
+            if (!(range > 1e-9) || !std::isfinite(range)) continue;
+            q_nominal(i) = 0.5 * (lim.lower + lim.upper);
+          }
+        }
+
+        const double w_post = opt.nullspace.posture.weight;
+        for (int i = 0; i < n; ++i) {
+          const JointSpec& j = model_.joint(i);
+          if (j.type == JointType::Fixed) continue;
+
+          double half = 1.0;
+          const JointLimit& lim = j.limit;
+          if (lim.enabled) {
+            const double range = lim.upper - lim.lower;
+            if (range > 1e-9 && std::isfinite(range)) {
+              half = 0.5 * range;
+            }
+          }
+
+          const double grad = 2.0 * (q_current(i) - q_nominal(i)) / (half * half);
+          z(i) += -w_post * grad;
+        }
+      }
+
+      if (z.allFinite() && z.squaredNorm() > 0.0) {
+        // Project into damped nullspace: (I - J^T M^{-1} J) z = z - J^T M^{-1} (J z)
+        const Eigen::MatrixXd M_inv_J = ldlt.solve(s_jac);  // 6 x n
+        const Eigen::MatrixXd P = s_jac.transpose() * M_inv_J;  // n x n
+        Eigen::VectorXd dq_null = z - (P * z);
+
+        if (dq_null.allFinite() && dq_null.squaredNorm() > 0.0) {
+          dq_null *= opt.nullspace.gain;
+
+          // Per-joint clamp.
+          const double frac = opt.nullspace.max_joint_step_frac;
+          const double abs_cap = opt.nullspace.max_joint_step_abs;
+          for (int i = 0; i < n; ++i) {
+            const JointSpec& j = model_.joint(i);
+            if (j.type == JointType::Fixed) continue;
+
+            double max_i = 0.0;
+            const JointLimit& lim = j.limit;
+            if (frac > 0.0 && lim.enabled) {
+              const double range = lim.upper - lim.lower;
+              if (range > 1e-9 && std::isfinite(range)) {
+                max_i = frac * range;
+              }
+            }
+            if (!(max_i > 0.0) && abs_cap > 0.0) {
+              max_i = abs_cap;
+            }
+
+            if (max_i > 0.0 && std::isfinite(max_i)) {
+              dq_null(i) = std::clamp(dq_null(i), -max_i, max_i);
+            }
+          }
+
+          // Norm clamp.
+          double cap = std::numeric_limits<double>::infinity();
+          if (opt.nullspace.max_norm_abs > 0.0) {
+            cap = std::min(cap, opt.nullspace.max_norm_abs);
+          }
+          if (opt.nullspace.max_norm_ratio > 0.0) {
+            cap = std::min(cap, opt.nullspace.max_norm_ratio * (dq_primary.norm() + 1e-9));
+          }
+          if (std::isfinite(cap) && cap > 0.0) {
+            const double nrm = dq_null.norm();
+            if (nrm > cap && nrm > 0.0) {
+              dq_null *= (cap / nrm);
+            }
+          }
+
+          dq_total += dq_null;
+        }
+      }
+    }
+  }
+
+  *dq = dq_total;
   if (!dq->allFinite()) {
     log(LogLevel::Error, "rmrcIncrement: non-finite joint increments");
     return Status::Failure;

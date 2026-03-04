@@ -1,6 +1,9 @@
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include <Eigen/Core>
 
@@ -15,6 +18,7 @@ using sclerp::core::ManipulatorModel;
 using sclerp::core::KinematicsSolver;
 using sclerp::core::Transform;
 using sclerp::core::Vec3;
+using sclerp::core::DualQuat;
 using sclerp::core::Status;
 using sclerp::core::ok;
 
@@ -154,9 +158,122 @@ static void test_motion_plan() {
   assert(dr <= opt.rot_tol * 10.0);
 }
 
+static void test_rmrc_nullspace_projection() {
+  constexpr int kDof = 7;
+  constexpr double kLink = 0.3;
+
+  Transform M = Transform::Identity();
+  M.translation() = Vec3(kLink * static_cast<double>(kDof), 0.0, 0.0);
+
+  sclerp::core::JointLimit lim;
+  lim.enabled = true;
+  lim.lower = -M_PI;
+  lim.upper = M_PI;
+
+  ManipulatorModel model;
+  {
+    ManipulatorBuilder b;
+    b.set_ee_home(M);
+    for (int i = 0; i < kDof; ++i) {
+      const double x = kLink * static_cast<double>(i);
+      b.add_revolute("j" + std::to_string(i + 1), Vec3(0, 0, 1), Vec3(x, 0, 0), lim);
+    }
+    const Status st = b.build(&model);
+    assert(ok(st));
+  }
+
+  KinematicsSolver solver(model);
+
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(kDof);
+  q << 2.9, 2.7, 2.8, 0.0, 0.0, 0.0, 0.0;
+
+  Transform g = Transform::Identity();
+  assert(ok(solver.forwardKinematics(q, &g)));
+
+  const DualQuat dq_i(g);
+  const DualQuat dq_f(g);  // no primary task delta
+
+  Eigen::VectorXd dq_out(kDof);
+
+  // Nullspace disabled: expect ~0 increment when dq_i == dq_f.
+  {
+    sclerp::core::RmrcOptions ropt;
+    ropt.nullspace.enabled = false;
+
+    KinematicsSolver::RmrcWorkspace ws;
+    assert(ok(solver.rmrcIncrement(dq_i, dq_f, q, &dq_out, ropt, &ws)));
+    assert(dq_out.norm() < 1e-10);
+  }
+
+  // Nullspace enabled: expect a posture/limit-avoidance motion that is mostly task-invisible.
+  {
+    sclerp::core::RmrcOptions ropt;
+    ropt.nullspace.enabled = true;
+    ropt.nullspace.joint_limits.enabled = true;
+    ropt.nullspace.posture.enabled = true;
+    // Primary task delta is zero here, so disable ratio clamping to allow a measurable secondary step.
+    ropt.nullspace.max_norm_ratio = 0.0;
+
+    KinematicsSolver::RmrcWorkspace ws;
+    assert(ok(solver.rmrcIncrement(dq_i, dq_f, q, &dq_out, ropt, &ws)));
+    assert(dq_out.allFinite());
+    assert(dq_out.norm() > 1e-6);
+
+    // Cost function consistent with the implemented gradients, freezing the joint-limit activation
+    // weights at the current q.
+    std::vector<double> mid(static_cast<std::size_t>(kDof), 0.0);
+    std::vector<double> half(static_cast<std::size_t>(kDof), 1.0);
+    std::vector<double> w_act(static_cast<std::size_t>(kDof), 0.0);
+
+    const double m = std::clamp(ropt.nullspace.joint_limits.margin_frac, 0.0, 0.49);
+    for (int i = 0; i < kDof; ++i) {
+      const auto& jl = model.joint(i).limit;
+      const double range = jl.upper - jl.lower;
+      mid[static_cast<std::size_t>(i)] = 0.5 * (jl.lower + jl.upper);
+      half[static_cast<std::size_t>(i)] = 0.5 * range;
+
+      const double x = (q(i) - mid[static_cast<std::size_t>(i)]) / half[static_cast<std::size_t>(i)];
+      const double absx = std::abs(x);
+      double w = 0.0;
+      if (m <= 0.0) {
+        w = 1.0;
+      } else {
+        const double x0 = 1.0 - 2.0 * m;
+        if (absx > x0) {
+          const double denom = std::max(1e-12, 1.0 - x0);
+          w = std::clamp((absx - x0) / denom, 0.0, 1.0);
+        }
+      }
+      w_act[static_cast<std::size_t>(i)] = w;
+    }
+
+    auto cost = [&](const Eigen::VectorXd& qq) {
+      double c = 0.0;
+      for (int i = 0; i < kDof; ++i) {
+        const double x = (qq(i) - mid[static_cast<std::size_t>(i)]) / half[static_cast<std::size_t>(i)];
+        c += ropt.nullspace.posture.weight * (x * x);
+        c += ropt.nullspace.joint_limits.weight * w_act[static_cast<std::size_t>(i)] * (x * x);
+      }
+      return c;
+    };
+
+    const double c0 = cost(q);
+    const double eps = 1e-3;
+    const Eigen::VectorXd q1 = q + eps * dq_out;
+    const double c1 = cost(q1);
+    assert(c1 < c0);
+
+    Eigen::MatrixXd J;
+    assert(ok(solver.spatialJacobian(q, &J)));
+    const Eigen::VectorXd task = (J * dq_out).eval();
+    assert(task.norm() <= 1e-2 * dq_out.norm() + 1e-9);
+  }
+}
+
 int main() {
   test_fk_and_jacobian();
   test_motion_plan();
+  test_rmrc_nullspace_projection();
   std::cout << "sclerp_core_smoke_test: PASS\n";
   return 0;
 }
