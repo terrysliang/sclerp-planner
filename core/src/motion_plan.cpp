@@ -7,13 +7,16 @@
 
 #include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/distance.hpp"
+#include "sclerp/core/planning/failure_dump_guard.hpp"
 #include "sclerp/core/screw/screw.hpp"
 
 #include <Eigen/Dense>
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <sstream>
+#include <utility>
 
 namespace sclerp::core {
 
@@ -62,22 +65,29 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
                                   const MotionPlanRequest& req,
                                   const MotionPlanOptions& opt) {
   MotionPlanResult out;
+  std::optional<MotionPlanFailureDumpGuard> dump_guard;
+  dump_guard.emplace("planMotionSclerp", req, solver, opt.failure_log, &out);
+
+  const auto finalize = [&]() -> MotionPlanResult {
+    dump_guard.reset();
+    return std::move(out);
+  };
 
   const int n = solver.model().dof();
   if (n <= 0) {
     log(LogLevel::Error, "planMotionSclerp: invalid dof");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (req.q_init.size() != n) {
     log(LogLevel::Error, "planMotionSclerp: q_init size mismatch");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (opt.max_iters <= 0) {
     log(LogLevel::Error, "planMotionSclerp: max_iters must be positive");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
 
   Transform g_fk = Transform::Identity();
@@ -86,7 +96,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerp: forwardKinematics failed");
       out.status = st;
-      return out;
+      return finalize();
     }
   }
   const double dp_fk = positionDistance(g_fk, req.g_i);
@@ -101,7 +111,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   if (!solver.model().within_limits(req.q_init, opt.q_init_tol)) {
     log(LogLevel::Error, "planMotionSclerp: q_init violates joint limits");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (fk_mismatch) {
     // Keep internal consistency: the planner trusts FK(q_init) as the true start state.
@@ -133,7 +143,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
   if (!ok(st_screw)) {
     log(LogLevel::Error, "planMotionSclerp: screwParameters failed");
     out.status = st_screw;
-    return out;
+    return finalize();
   }
 
   int iters = 0;
@@ -164,14 +174,14 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
       log(LogLevel::Error, "planMotionSclerp: rmrcIncrement failed");
       out.status = st;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     if (!dq.allFinite()) {
       log(LogLevel::Error, "planMotionSclerp: RMRC produced NaN/Inf");
       out.status = Status::Failure;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     while (true) {
@@ -187,7 +197,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
         log(LogLevel::Warn, "planMotionSclerp: joint limits reached");
         out.status = Status::JointLimit;
         out.iters = iters;
-        return out;
+        return finalize();
       }
 
       // Conservative backoff: shrink the step until a joint-limit-safe q_next exists.
@@ -202,7 +212,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
       log(LogLevel::Error, "planMotionSclerp: forwardKinematics failed in loop");
       out.status = st;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     dq_current = DualQuat(g_current);
@@ -224,7 +234,7 @@ MotionPlanResult planMotionSclerp(const KinematicsSolver& solver,
     }
     out.status = Status::Failure;
   }
-  return out;
+  return finalize();
 }
 
 }  // namespace sclerp::core

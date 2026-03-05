@@ -30,6 +30,7 @@ using sclerp::core::Thresholds;
 using sclerp::core::Transform;
 using sclerp::core::DualQuat;
 using sclerp::core::JointPath;
+using sclerp::core::FailureLogOptions;
 
 }  // namespace
 
@@ -135,6 +136,11 @@ void bind_core(py::module_& m) {
       .def_readwrite("positions", &JointPath::positions)
       .def("size", &JointPath::size);
 
+  py::class_<FailureLogOptions>(m, "FailureLogOptions")
+      .def(py::init<>())
+      .def_readwrite("enabled", &FailureLogOptions::enabled)
+      .def_readwrite("dir", &FailureLogOptions::dir);
+
   py::class_<MotionPlanOptions>(m, "MotionPlanOptions")
       .def(py::init<>())
       .def_readwrite("max_iters", &MotionPlanOptions::max_iters)
@@ -148,6 +154,7 @@ void bind_core(py::module_& m) {
       .def_readwrite("tau_break", &MotionPlanOptions::tau_break)
       .def_readwrite("joint_delta_min", &MotionPlanOptions::joint_delta_min)
       .def_readwrite("rmrc", &MotionPlanOptions::rmrc)
+      .def_readwrite("failure_log", &MotionPlanOptions::failure_log)
       .def_readwrite("thr", &MotionPlanOptions::thr);
 
   py::class_<MotionPlanResult>(m, "MotionPlanResult")

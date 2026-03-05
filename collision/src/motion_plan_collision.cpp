@@ -11,12 +11,15 @@
 #include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/distance.hpp"
 #include "sclerp/core/math/types.hpp"
+#include "sclerp/core/planning/failure_dump_guard.hpp"
 #include "sclerp/core/screw/screw.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <sstream>
+#include <utility>
 
 namespace sclerp::collision {
 
@@ -87,6 +90,13 @@ MotionPlanResult planMotionSclerpWithCollision(
     CollisionScene& scene,
     const CollisionMotionPlanOptions& opt) {
   MotionPlanResult out;
+  std::optional<sclerp::core::MotionPlanFailureDumpGuard> dump_guard;
+  dump_guard.emplace("planMotionSclerpWithCollision", req, solver, opt.motion.failure_log, &out);
+
+  const auto finalize = [&]() -> MotionPlanResult {
+    dump_guard.reset();
+    return std::move(out);
+  };
   const auto& link_meshes = scene.ctx.link_meshes;
   const auto& mesh_offset_transforms = scene.mesh_offset_transforms;
   const auto& grasped_object = scene.ctx.grasped_object;
@@ -95,32 +105,32 @@ MotionPlanResult planMotionSclerpWithCollision(
   if (n <= 0) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: invalid dof");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (req.q_init.size() != n) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: q_init size mismatch");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (opt.motion.max_iters <= 0) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: max_iters must be positive");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (opt.avoidance.safe_dist <= 0.0 || opt.avoidance.dt <= 0.0) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: invalid collision params");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (opt.query.num_links_ignore < 0 || opt.query.num_links_ignore >= n) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: invalid num_links_ignore");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (link_meshes.empty()) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: link meshes are empty");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
 
   Transform g_fk = Transform::Identity();
@@ -129,7 +139,7 @@ MotionPlanResult planMotionSclerpWithCollision(
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerpWithCollision: forwardKinematics failed");
       out.status = st;
-      return out;
+      return finalize();
     }
   }
   const double dp_fk = positionDistance(g_fk, req.g_i);
@@ -143,7 +153,7 @@ MotionPlanResult planMotionSclerpWithCollision(
   if (!solver.model().within_limits(req.q_init, opt.motion.q_init_tol)) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: q_init violates joint limits");
     out.status = Status::InvalidParameter;
-    return out;
+    return finalize();
   }
   if (fk_mismatch) {
     if (shouldLog(LogLevel::Warn)) {
@@ -172,7 +182,7 @@ MotionPlanResult planMotionSclerpWithCollision(
   if (!ok(st_screw)) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: screwParameters failed");
     out.status = st_screw;
-    return out;
+    return finalize();
   }
 
   int iters = 0;
@@ -208,14 +218,14 @@ MotionPlanResult planMotionSclerpWithCollision(
       log(LogLevel::Error, "planMotionSclerpWithCollision: rmrcIncrement failed");
       out.status = st;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     if (!dq.allFinite()) {
       log(LogLevel::Error, "planMotionSclerpWithCollision: RMRC produced NaN/Inf");
       out.status = Status::Failure;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     // Collision avoidance linearization at the current configuration.
@@ -225,7 +235,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       log(LogLevel::Error, "planMotionSclerpWithCollision: forwardKinematicsAll failed");
       out.status = st_fk_all;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     const bool fk_has_tool = (fk_intermediate.size() == static_cast<std::size_t>(n + 2));
@@ -239,13 +249,13 @@ MotionPlanResult planMotionSclerpWithCollision(
       log(LogLevel::Error, "planMotionSclerpWithCollision: link mesh count mismatch");
       out.status = Status::InvalidParameter;
       out.iters = iters;
-      return out;
+      return finalize();
     }
     if (mesh_offset_transforms.size() != expected_transforms) {
       log(LogLevel::Error, "planMotionSclerpWithCollision: mesh offset size mismatch");
       out.status = Status::InvalidParameter;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     g_intermediate.clear();
@@ -261,7 +271,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       log(LogLevel::Error, "planMotionSclerpWithCollision: updateLinkMeshTransforms failed");
       out.status = st;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     if (grasped_object) {
@@ -275,7 +285,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       log(LogLevel::Error, "planMotionSclerpWithCollision: computeContacts failed");
       out.status = st;
       out.iters = iters;
-      return out;
+      return finalize();
     }
     if (shouldLog(LogLevel::Debug)) {
       double min_contact_dist = std::numeric_limits<double>::infinity();
@@ -306,7 +316,7 @@ MotionPlanResult planMotionSclerpWithCollision(
         log(LogLevel::Error, "planMotionSclerpWithCollision: adjustJoints failed");
         out.status = st;
         out.iters = iters;
-        return out;
+        return finalize();
       }
       q_next = adjusted;
       const Eigen::VectorXd adjusted_delta = q_next - q;
@@ -340,7 +350,7 @@ MotionPlanResult planMotionSclerpWithCollision(
         log(LogLevel::Warn, "planMotionSclerpWithCollision: joint limits reached");
         out.status = Status::JointLimit;
         out.iters = iters;
-        return out;
+        return finalize();
       }
 
       if (shouldLog(LogLevel::Debug)) {
@@ -365,7 +375,7 @@ MotionPlanResult planMotionSclerpWithCollision(
       log(LogLevel::Error, "planMotionSclerpWithCollision: forwardKinematics failed in loop");
       out.status = st;
       out.iters = iters;
-      return out;
+      return finalize();
     }
 
     dq_current = DualQuat(g_current);
@@ -380,7 +390,7 @@ MotionPlanResult planMotionSclerpWithCollision(
     log(LogLevel::Error, "planMotionSclerpWithCollision: forwardKinematicsAll failed at final sync");
     out.status = st_fk_all_end;
     out.iters = iters;
-    return out;
+    return finalize();
   }
 
   const bool fk_has_tool_end = (fk_intermediate.size() == static_cast<std::size_t>(n + 2));
@@ -394,13 +404,13 @@ MotionPlanResult planMotionSclerpWithCollision(
     log(LogLevel::Error, "planMotionSclerpWithCollision: link mesh count mismatch at final sync");
     out.status = Status::InvalidParameter;
     out.iters = iters;
-    return out;
+    return finalize();
   }
   if (mesh_offset_transforms.size() != expected_transforms_end) {
     log(LogLevel::Error, "planMotionSclerpWithCollision: mesh offset size mismatch at final sync");
     out.status = Status::InvalidParameter;
     out.iters = iters;
-    return out;
+    return finalize();
   }
 
   g_intermediate.clear();
@@ -416,7 +426,7 @@ MotionPlanResult planMotionSclerpWithCollision(
     log(LogLevel::Error, "planMotionSclerpWithCollision: updateLinkMeshTransforms failed at final sync");
     out.status = st_final;
     out.iters = iters;
-    return out;
+    return finalize();
   }
   if (grasped_object) {
     const Mat4& g_tool = g_intermediate.back();
@@ -437,7 +447,7 @@ MotionPlanResult planMotionSclerpWithCollision(
     }
     out.status = Status::Failure;
   }
-  return out;
+  return finalize();
 }
 
 }  // namespace sclerp::collision

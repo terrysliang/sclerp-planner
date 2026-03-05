@@ -7,6 +7,7 @@
 /_install/
 /install/
 /log/
+/sclerp_failure_logs/
 
 # CMake generated
 CMakeFiles/
@@ -22,3 +23,7 @@ compile_commands.json
 
 # OS junk
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc

@@ -46,6 +46,18 @@ install(TARGETS sclerp_gazebo_generate_world
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# ---- CLI failure-dump visualizer ----
+add_executable(sclerp_gazebo_visualize_failure_dump
+  src/visualize_failure_dump_cli.cpp
+)
+target_link_libraries(sclerp_gazebo_visualize_failure_dump PRIVATE sclerp_gazebo)
+target_compile_features(sclerp_gazebo_visualize_failure_dump PRIVATE cxx_std_17)
+sclerp_target_warnings(sclerp_gazebo_visualize_failure_dump)
+
+install(TARGETS sclerp_gazebo_visualize_failure_dump
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 # ---- ignition gazebo sim plugin (optional) ----
 option(SCLERP_GAZEBO_BUILD_IGNITION_PLUGIN
   "Build Gazebo Sim 6 system plugins (JointTrajectoryPlayer, WorldSdfSaver, PrimitiveResizer)"

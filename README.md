@@ -34,6 +34,7 @@ Common toggles:
 - `SCLERP_BUILD_TRAJECTORY=ON|OFF`
 - `SCLERP_BUILD_COLLISION=ON|OFF` (requires FCL + Assimp + Boost)
 - `SCLERP_BUILD_GAZEBO=ON|OFF` (requires `SCLERP_BUILD_COLLISION=ON`, plus `sdformat12` + `urdfdom`)
+- `SCLERP_BUILD_PYTHON=ON|OFF` (pybind11 extension; requires `SCLERP_BUILD_GAZEBO=ON` and thus `SCLERP_BUILD_COLLISION=ON`)
 - `SCLERP_BUILD_TESTS=ON|OFF`
 - `SCLERP_BUILD_EXAMPLES=ON|OFF` (requires `SCLERP_BUILD_GAZEBO=ON`)
 
@@ -112,6 +113,18 @@ req.g_f.translation().x() += 0.2;
 const auto result = sclerp::core::planMotionSclerp(solver, req);
 // result.status + result.path.positions
 ```
+
+### Failure dumps (debug)
+
+When enabled, `planMotionSclerp` / `planMotionSclerpWithCollision` will write a timestamped CSV joint-path dump (best effort) on non-success and print the dump path via the internal logger.
+
+In C++ / Python, enable via planner options:
+- `MotionPlanOptions.failure_log.enabled = true`
+- `MotionPlanOptions.failure_log.dir = "/abs/or/relative/dir"` (optional; default: `./sclerp_failure_logs/`)
+
+To visualize a dumped joint path in Gazebo (trajectory.csv + world.sdf):
+- Python: `python/scripts/visualize_failure_dump_gazebo.py` (requires `SCLERP_BUILD_PYTHON=ON`, which builds and links the `trajectory` + `gazebo` modules).
+- C++: `sclerp_gazebo_visualize_failure_dump --dump <dump.csv> --urdf ... --stl-dir ... --base-link ... --tip-link ...` (requires `SCLERP_BUILD_GAZEBO=ON`).
 
 ## Collision-aware planning (optional)
 

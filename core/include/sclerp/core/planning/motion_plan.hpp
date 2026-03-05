@@ -4,6 +4,7 @@
 #include "sclerp/core/math/types.hpp"
 #include "sclerp/core/kinematics/kinematics_solver.hpp"
 #include "sclerp/core/path/joint_path.hpp"
+#include "sclerp/core/planning/failure_log.hpp"
 
 namespace sclerp::core {
 
@@ -37,6 +38,9 @@ struct MotionPlanOptions {
 
   // RMRC damping configuration
   RmrcOptions rmrc{};
+
+  // Failure-dump options (best-effort debug artifact export).
+  FailureLogOptions failure_log{};
 
   Thresholds thr = kDefaultThresholds;
 };

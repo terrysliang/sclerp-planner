@@ -9,6 +9,8 @@ add_library(sclerp_core
   src/adjoint.cpp
   src/distance.cpp
   src/logger.cpp
+  src/failure_log.cpp
+  src/failure_dump_guard.cpp
   src/dual_quat.cpp
   src/screw.cpp
   src/manipulator_model.cpp
