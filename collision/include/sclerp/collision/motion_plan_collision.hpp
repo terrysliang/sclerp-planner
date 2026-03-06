@@ -17,6 +17,8 @@ namespace sclerp::collision {
 // - LCP-based joint correction (`adjustJoints`)
 struct CollisionMotionPlanOptions {
   sclerp::core::MotionPlanOptions motion{};
+  // When `query.use_obstacle_broadphase` is enabled, the planner reuses one internal obstacle
+  // broadphase cache for this call; `scene.ctx.obstacles` is assumed static while planning runs.
   CollisionQueryOptions query{};
   CollisionAvoidanceOptions avoidance{};
 };

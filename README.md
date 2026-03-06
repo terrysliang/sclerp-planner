@@ -133,6 +133,14 @@ joint correction step. You provide:
 - per-link STL meshes (base at index 0), plus optional per-link mesh offsets
 - obstacle objects (boxes/spheres/cylinders/planes/meshes)
 
+`CollisionQueryOptions::use_obstacle_broadphase` is enabled by default. When enabled, obstacle-vs-link and
+obstacle-vs-grasped-object environment queries are pruned through an internal FCL obstacle broadphase;
+self-collision remains pairwise.
+
+Broadphase reuse in `planMotionSclerpWithCollision` assumes the obstacle list and obstacle transforms stay fixed
+for the duration of that planning call. Standalone `computeContacts(...)` also honors the option, but it may build
+a temporary obstacle broadphase internally, so the main performance benefit comes from planner-level reuse.
+
 ## Trajectory generation
 
 The core planner returns a `JointPath` (positions only). To make it executable on a controller (or to export a

@@ -101,6 +101,14 @@ static Status adjustJointsFromArrays(
     j_pinv[static_cast<size_t>(i)] = std::move(Jpinv); // k×3
   }
 
+  // Precompute per-contact vectors: J^† * n  (k×1)
+  std::vector<Eigen::VectorXd> j_pinv_times_n;
+  j_pinv_times_n.resize(static_cast<size_t>(nc));
+  for (int i = 0; i < nc; ++i) {
+    const Eigen::Vector3d ni = contact_normal_array.col(i);
+    j_pinv_times_n[static_cast<size_t>(i)] = j_pinv[static_cast<size_t>(i)] * ni; // k×1
+  }
+
   // Build LCP: w = q + M z, with w>=0, z>=0, w^T z = 0
   Eigen::VectorXd q_lcp = Eigen::VectorXd::Zero(nc);
   Eigen::MatrixXd M_lcp = Eigen::MatrixXd::Zero(nc, nc);
@@ -117,20 +125,15 @@ static Status adjustJointsFromArrays(
     q_lcp[n] = (dist_n - safe_dist) + h * vel_term;
 
     for (int m = 0; m < nc; ++m) {
-      const Eigen::Vector3d nm = contact_normal_array.col(m);
-
       const int km = k_cols[m];
-      const auto& Jpinv_m = j_pinv[static_cast<size_t>(m)]; // km×3
+      const auto& Jpinv_n_m = j_pinv_times_n[static_cast<size_t>(m)]; // km×1
 
       // Need Jn_full(3×dof) * Jpinv_m_full(dof×3) but avoid building full:
-      // Equivalent: Jn(3×kn) * Jpinv_m_padded(kn×3),
-      // where Jpinv_m_padded.topRows(min(kn,km)) = Jpinv_m.topRows(min(kn,km)).
-      Eigen::MatrixXd Jpinv_m_to_kn = Eigen::MatrixXd::Zero(kn, 3);
+      // Equivalent: h * n_n^T * Jn(:,0:k) * (J^†_m * n_m)(0:k)
       const int k_overlap = std::min(kn, km);
-      Jpinv_m_to_kn.topRows(k_overlap) = Jpinv_m.topRows(k_overlap);
-
-      const Eigen::Matrix3d T = (Jn * Jpinv_m_to_kn).eval(); // 3×3
-      M_lcp(n, m) = h * (nn.transpose() * T * nm)(0, 0);
+      const Eigen::Vector3d w =
+          (Jn.leftCols(k_overlap) * Jpinv_n_m.head(k_overlap)).eval(); // 3×1
+      M_lcp(n, m) = h * nn.dot(w);
     }
   }
 
@@ -154,11 +157,7 @@ static Status adjustJointsFromArrays(
   Eigen::VectorXd comp_joint_values = Eigen::VectorXd::Zero(dof);
   for (int i = 0; i < nc; ++i) {
     const int k = k_cols[i];
-    const Eigen::Vector3d ni = contact_normal_array.col(i);
-
-    // dq_i (k×1) = J^† (k×3) * (n (3×1) * z_i)
-    const Eigen::VectorXd dq_i = j_pinv[static_cast<size_t>(i)] * (ni * z[i]); // k×1
-    comp_joint_values.head(k) += dq_i;
+    comp_joint_values.head(k) += j_pinv_times_n[static_cast<size_t>(i)].head(k) * z[i];
   }
 
   // Safeguard
@@ -214,10 +213,10 @@ Status adjustJoints(
     }
 
     if (d <= comp_activate_tol) {
-      contact_normal_array.col(i) = c.normal;               // active
-      j_contact_array.push_back(c.J_contact);               // active
+      contact_normal_array.col(i) = c.normal;  // active
+      j_contact_array.push_back(c.J_contact);
     } else {
-      contact_normal_array.col(i).setZero();                // inactive => no coupling
+      contact_normal_array.col(i).setZero();  // inactive => no coupling
       j_contact_array.push_back(Eigen::MatrixXd::Zero(3, c.J_contact.cols()));
     }
   }
@@ -232,6 +231,6 @@ Status adjustJoints(
       next_joint_values,
       j_contact_array,
       adjusted_joint_values);
-  }
+}
 
 }  // namespace sclerp::collision

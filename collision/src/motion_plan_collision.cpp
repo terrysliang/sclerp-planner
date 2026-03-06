@@ -8,6 +8,9 @@
 #include "sclerp/collision/motion_plan_collision.hpp"
 #include "sclerp/collision/avoidance.hpp"
 
+#include "contact_compute_internal.hpp"
+#include "obstacle_broadphase.hpp"
+
 #include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/distance.hpp"
 #include "sclerp/core/math/types.hpp"
@@ -98,6 +101,7 @@ MotionPlanResult planMotionSclerpWithCollision(
     return std::move(out);
   };
   const auto& link_meshes = scene.ctx.link_meshes;
+  const auto& obstacles = scene.ctx.obstacles;
   const auto& mesh_offset_transforms = scene.mesh_offset_transforms;
   const auto& grasped_object = scene.ctx.grasped_object;
 
@@ -194,6 +198,18 @@ MotionPlanResult planMotionSclerpWithCollision(
   std::vector<Transform> fk_intermediate;
   std::vector<Mat4> g_intermediate;
   ContactSet contacts;
+  std::optional<detail::ObstacleBroadphaseCache> obstacle_broadphase;
+  if (opt.query.use_obstacle_broadphase && !obstacles.empty()) {
+    // Reuse one obstacle broadphase for this planning call. This assumes `scene.ctx.obstacles`
+    // and their transforms remain fixed while the planner runs.
+    obstacle_broadphase.emplace();
+    const Status st_cache = obstacle_broadphase->build(obstacles);
+    if (!ok(st_cache)) {
+      log(LogLevel::Error, "planMotionSclerpWithCollision: obstacle broadphase build failed");
+      out.status = st_cache;
+      return finalize();
+    }
+  }
 
   while (!((pos_dist < opt.motion.pos_tol) && (rot_dist < opt.motion.rot_tol)) &&
          (iters < opt.motion.max_iters)) {
@@ -279,7 +295,8 @@ MotionPlanResult planMotionSclerpWithCollision(
       grasped_object->setTransform(g_tool.block<3,1>(0, 3), g_tool.block<3,3>(0, 0));
     }
 
-    st = computeContacts(solver, q, scene.ctx, opt.query, &contacts);
+    st = detail::computeContactsImpl(
+        solver, q, scene.ctx, opt.query, obstacle_broadphase ? &*obstacle_broadphase : nullptr, &contacts);
 
     if (!ok(st)) {
       log(LogLevel::Error, "planMotionSclerpWithCollision: computeContacts failed");

@@ -82,7 +82,8 @@ void bind_collision(py::module_& m) {
   py::class_<CollisionQueryOptions>(m, "CollisionQueryOptions")
       .def(py::init<>())
       .def_readwrite("check_self_collision", &CollisionQueryOptions::check_self_collision)
-      .def_readwrite("num_links_ignore", &CollisionQueryOptions::num_links_ignore);
+      .def_readwrite("num_links_ignore", &CollisionQueryOptions::num_links_ignore)
+      .def_readwrite("use_obstacle_broadphase", &CollisionQueryOptions::use_obstacle_broadphase);
 
   py::class_<CollisionAvoidanceOptions>(m, "CollisionAvoidanceOptions")
       .def(py::init<>())
@@ -134,4 +135,3 @@ void bind_collision(py::module_& m) {
 }
 
 }  // namespace sclerp::python
-

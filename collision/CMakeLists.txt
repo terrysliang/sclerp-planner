@@ -19,6 +19,7 @@ endif()
 add_library(sclerp_collision
   src/avoidance.cpp
   src/collision.cpp
+  src/obstacle_broadphase.cpp
   src/robot_link_meshes.cpp
   src/motion_plan_collision.cpp
   src/lemke.cpp
@@ -89,4 +90,12 @@ if(SCLERP_BUILD_TESTS AND BUILD_TESTING)
   target_compile_features(sclerp_collision_unit_test PRIVATE cxx_std_17)
 
   add_test(NAME sclerp_collision_unit_test COMMAND sclerp_collision_unit_test)
+endif()
+
+if(SCLERP_BUILD_BENCHMARKS)
+  add_executable(sclerp_collision_obstacle_broadphase_benchmark
+    bench/obstacle_broadphase_benchmark.cpp
+  )
+  target_link_libraries(sclerp_collision_obstacle_broadphase_benchmark PRIVATE sclerp_collision)
+  target_compile_features(sclerp_collision_obstacle_broadphase_benchmark PRIVATE cxx_std_17)
 endif()

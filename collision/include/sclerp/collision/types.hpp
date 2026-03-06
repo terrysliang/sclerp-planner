@@ -33,6 +33,10 @@ struct ContactSet {
 struct CollisionQueryOptions {
   bool check_self_collision = false;
   int num_links_ignore = 0;
+  // Prunes obstacle-vs-link and obstacle-vs-grasped-object environment queries with an obstacle
+  // broadphase. Self-collision remains pairwise. When reused by the collision planner, this
+  // assumes the obstacle set and obstacle transforms stay fixed for that planning call.
+  bool use_obstacle_broadphase = true;
 };
 
 }  // namespace sclerp::collision

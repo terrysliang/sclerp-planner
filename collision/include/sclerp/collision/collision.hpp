@@ -15,6 +15,10 @@
 
 namespace sclerp::collision {
 
+namespace detail {
+class ObstacleBroadphaseCache;
+}
+
 // FCL-backed collision queries + contact extraction.
 //
 // The collision module assumes `link_meshes` includes base at index 0, followed by one mesh per
@@ -40,6 +44,10 @@ protected:
 
   std::shared_ptr<fcl::CollisionGeometryd> geometry_;
   fcl::CollisionObjectd collision_object_;
+
+private:
+  friend class detail::ObstacleBroadphaseCache;
+  fcl::CollisionObjectd& collisionObjectMutable();
 };
 
 class BoxObject : public FclObject {
@@ -137,6 +145,9 @@ Status computeContacts(const sclerp::core::KinematicsSolver& solver,
                        const Eigen::VectorXd& q,
                        const CollisionContext& ctx,
                        const CollisionQueryOptions& opt,
+                       // When `opt.use_obstacle_broadphase` is enabled, this standalone API may
+                       // build a temporary obstacle broadphase internally. The main reuse win is
+                       // in `planMotionSclerpWithCollision`, which reuses one cache per call.
                        ContactSet* out);
 
 }  // namespace sclerp::collision

@@ -8,6 +8,9 @@
 //   recover a usable contact normal for push-out.
 #include "sclerp/collision/collision.hpp"
 
+#include "contact_compute_internal.hpp"
+#include "obstacle_broadphase.hpp"
+
 #include "sclerp/core/common/logger.hpp"
 #include "sclerp/core/math/so3.hpp"
 
@@ -16,6 +19,8 @@
 #include <assimp/scene.h>
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <optional>
 
 namespace sclerp::collision {
 
@@ -46,6 +51,14 @@ static inline int cylinderIndexToSolverLinkIndex(int cylinder_index) {
   return cylinder_index - 1;
 }
 
+static void resetObstacleHit(detail::ObstacleHit* out) {
+  out->status = Status::Success;
+  out->found = false;
+  out->distance = std::numeric_limits<double>::infinity();
+  out->point_obj.setZero();
+  out->point_query.setZero();
+}
+
 FclObject::FclObject(std::shared_ptr<fcl::CollisionGeometryd> geometry,
                          const Vec3& position,
                          const Mat3& orientation)
@@ -55,6 +68,10 @@ FclObject::FclObject(std::shared_ptr<fcl::CollisionGeometryd> geometry,
 }
 
 const fcl::CollisionObjectd& FclObject::collisionObject() const {
+  return collision_object_;
+}
+
+fcl::CollisionObjectd& FclObject::collisionObjectMutable() {
   return collision_object_;
 }
 
@@ -293,7 +310,7 @@ Status checkCollision(const FclObject& obj1,
     // Use collision query to get a stable normal in touch/penetration
     fcl::CollisionRequestd creq;
     creq.enable_contact = true;
-    creq.num_max_contacts = 16;
+    creq.num_max_contacts = 1;
     creq.gjk_solver_type = fcl::GJKSolverType::GST_INDEP;
     fcl::CollisionResultd cres;
 
@@ -346,6 +363,66 @@ Status checkCollision(const FclObject& obj1,
   return Status::Success;
 }
 
+static Status findNearestObstacleContactBruteForce(
+    const std::vector<std::shared_ptr<FclObject>>& obstacles,
+    FclObject& query,
+    detail::ObstacleHit* out,
+    detail::ComputeContactsStats* stats) {
+  if (!validOut(out, "findNearestObstacleContactBruteForce: null output")) {
+    return Status::InvalidParameter;
+  }
+
+  resetObstacleHit(out);
+  for (const auto& obstacle : obstacles) {
+    if (!obstacle) return Status::InvalidParameter;
+
+    if (stats) {
+      ++stats->exact_obstacle_narrowphase_checks;
+    }
+
+    double min_d = 0.0;
+    Vec3 point_obj = Vec3::Zero();
+    Vec3 point_query = Vec3::Zero();
+    const Status st = checkCollision(*obstacle, query, &min_d, &point_obj, &point_query);
+    if (!ok(st)) return st;
+
+    if (!out->found || min_d < out->distance) {
+      out->found = true;
+      out->distance = min_d;
+      out->point_obj = point_obj;
+      out->point_query = point_query;
+    }
+
+    if (out->found && out->distance <= 0.0) {
+      break;
+    }
+  }
+
+  return Status::Success;
+}
+
+static Status validateComputeContactsInputs(const sclerp::core::KinematicsSolver& solver,
+                                           const Eigen::VectorXd& q,
+                                           const CollisionContext& ctx,
+                                           const CollisionQueryOptions& opt,
+                                           const ContactSet* out,
+                                           int* dof_out) {
+  if (!validOut(out, "computeContacts: null output")) return Status::InvalidParameter;
+  if (!validOut(dof_out, "computeContacts: null dof_out")) return Status::InvalidParameter;
+
+  const int dof = solver.model().dof();
+  if (dof <= 0) return Status::InvalidParameter;
+  if (q.size() != dof) return Status::InvalidParameter;
+  if (opt.num_links_ignore < 0 || opt.num_links_ignore >= dof) return Status::InvalidParameter;
+  if (static_cast<int>(ctx.link_meshes.size()) < dof + 1) {
+    log(LogLevel::Error, "computeContacts: link_meshes size insufficient");
+    return Status::InvalidParameter;
+  }
+
+  *dof_out = dof;
+  return Status::Success;
+}
+
 static Status computeContactArrays(
     const sclerp::core::KinematicsSolver& solver,
     const Eigen::VectorXd& q,
@@ -355,6 +432,8 @@ static Status computeContactArrays(
     bool check_self_collision,
     int num_links_ignore,
     int dof,
+    const detail::ObstacleBroadphaseCache* obstacle_broadphase,
+    detail::ComputeContactsStats* stats,
     Eigen::MatrixXd* contact_normal_array_3xN,
     std::vector<double>* dist_array,
     std::vector<Eigen::MatrixXd>* contact_points_array_3x2,
@@ -422,42 +501,48 @@ static Status computeContactArrays(
   };
 
   // Environment collision checks
-  for (const auto& obstacle : obstacles) {
-    if (!obstacle) return Status::InvalidParameter;
+  for (int slot = 0; slot < total_links; ++slot) {
+    // Distance is clamped to be non-negative in this stack; once we hit 0 we can't improve.
+    if ((*dist_array)[slot] <= 0.0) continue;
+    const int cyl_idx = activeSlotToCylinderIndex(slot, num_links_ignore); // 1..dof
+    const auto& cyl = link_meshes[cyl_idx];
+    if (!cyl) return Status::Failure;
 
-    for (int slot = 0; slot < total_links; ++slot) {
-      const int cyl_idx = activeSlotToCylinderIndex(slot, num_links_ignore); // 1..dof
-      const auto& cyl = link_meshes[cyl_idx];
-      if (!cyl) return Status::Failure;
+    detail::ObstacleHit hit;
+    const Status st = obstacle_broadphase
+        ? obstacle_broadphase->findNearestObstacleContact(*cyl,
+                                                          &hit,
+                                                          stats ? &stats->exact_obstacle_narrowphase_checks : nullptr)
+        : findNearestObstacleContactBruteForce(obstacles, *cyl, &hit, stats);
+    if (!ok(st)) return st;
 
-      Vec3 cp_obj, cp_link;
-      double min_d = 0.0;
-      const Status st = checkCollision(*obstacle, *cyl, &min_d, &cp_obj, &cp_link);
-      if (!ok(st)) return st;
-
-      tryUpdateSlot(slot, min_d, cp_obj, cp_link);
+    if (hit.found) {
+      tryUpdateSlot(slot, hit.distance, hit.point_obj, hit.point_query);
     }
   }
 
   // Grasped object vs. environment
   if (grasped_object) {
     const int grasp_slot = total_links;
-
-    for (const auto& obstacle : obstacles) {
-      if (!obstacle) return Status::InvalidParameter;
-
-      Vec3 cp_obj, cp_grasp;
-      double min_d = 0.0;
-      const Status st = checkCollision(*obstacle, *grasped_object, &min_d, &cp_obj, &cp_grasp);
+    if ((*dist_array)[grasp_slot] > 0.0) {
+      detail::ObstacleHit hit;
+      const Status st = obstacle_broadphase
+          ? obstacle_broadphase->findNearestObstacleContact(*grasped_object,
+                                                            &hit,
+                                                            stats ? &stats->exact_obstacle_narrowphase_checks : nullptr)
+          : findNearestObstacleContactBruteForce(obstacles, *grasped_object, &hit, stats);
       if (!ok(st)) return st;
 
-      tryUpdateSlot(grasp_slot, min_d, cp_obj, cp_grasp);
+      if (hit.found) {
+        tryUpdateSlot(grasp_slot, hit.distance, hit.point_obj, hit.point_query);
+      }
     }
   }
 
   // Self-collision (optional)
   if (check_self_collision) {
     for (int slot = 0; slot < total_links; ++slot) {
+      if ((*dist_array)[slot] <= 0.0) continue;
       const int cyl_idx1 = activeSlotToCylinderIndex(slot, num_links_ignore); // moving
       const auto& link1 = link_meshes[cyl_idx1];
       if (!link1) return Status::Failure;
@@ -485,6 +570,7 @@ static Status computeContactArrays(
 
         // Here: p_obj is on link2, p_link is on link1 (moving link)
         tryUpdateSlot(slot, min_d, cp2, cp1);
+        if ((*dist_array)[slot] <= 0.0) break;
       }
     }
   }
@@ -527,25 +613,15 @@ static Status computeContactArrays(
   return Status::Success;
 }
 
-
-Status computeContacts(
+static Status computeContactsImplValidated(
     const sclerp::core::KinematicsSolver& solver,
     const Eigen::VectorXd& q,
     const CollisionContext& ctx,
     const CollisionQueryOptions& opt,
-    ContactSet* out) {
-  if (!validOut(out, "computeContacts: null output")) return Status::InvalidParameter;
-
-  const int dof = solver.model().dof();
-  if (dof <= 0) return Status::InvalidParameter;
-  if (q.size() != dof) return Status::InvalidParameter;
-
-  if (opt.num_links_ignore < 0 || opt.num_links_ignore >= dof) return Status::InvalidParameter;
-  if (static_cast<int>(ctx.link_meshes.size()) < dof + 1) {
-    log(LogLevel::Error, "computeContacts: link_meshes size insufficient");
-    return Status::InvalidParameter;
-  }
-
+    int dof,
+    const detail::ObstacleBroadphaseCache* obstacle_broadphase,
+    ContactSet* out,
+    detail::ComputeContactsStats* stats) {
   Eigen::MatrixXd normals_3xN;
   std::vector<double> dists;
   std::vector<Eigen::MatrixXd> points_3x2;
@@ -561,6 +637,8 @@ Status computeContacts(
       opt.check_self_collision,
       opt.num_links_ignore,
       dof,
+      obstacle_broadphase,
+      stats,
       &normals_3xN,
       &dists,
       &points_3x2,
@@ -616,6 +694,43 @@ Status computeContacts(
   }
 
   return Status::Success;
+}
+
+Status detail::computeContactsImpl(
+    const sclerp::core::KinematicsSolver& solver,
+    const Eigen::VectorXd& q,
+    const CollisionContext& ctx,
+    const CollisionQueryOptions& opt,
+    const detail::ObstacleBroadphaseCache* obstacle_broadphase,
+    ContactSet* out,
+    detail::ComputeContactsStats* stats) {
+  int dof = 0;
+  const Status st = validateComputeContactsInputs(solver, q, ctx, opt, out, &dof);
+  if (!ok(st)) return st;
+
+  return computeContactsImplValidated(solver, q, ctx, opt, dof, obstacle_broadphase, out, stats);
+}
+
+Status computeContacts(
+    const sclerp::core::KinematicsSolver& solver,
+    const Eigen::VectorXd& q,
+    const CollisionContext& ctx,
+    const CollisionQueryOptions& opt,
+    ContactSet* out) {
+  int dof = 0;
+  const Status st = validateComputeContactsInputs(solver, q, ctx, opt, out, &dof);
+  if (!ok(st)) return st;
+
+  std::optional<detail::ObstacleBroadphaseCache> obstacle_broadphase;
+  const detail::ObstacleBroadphaseCache* obstacle_broadphase_ptr = nullptr;
+  if (opt.use_obstacle_broadphase && !ctx.obstacles.empty()) {
+    obstacle_broadphase.emplace();
+    const Status st_cache = obstacle_broadphase->build(ctx.obstacles);
+    if (!ok(st_cache)) return st_cache;
+    obstacle_broadphase_ptr = &*obstacle_broadphase;
+  }
+
+  return computeContactsImplValidated(solver, q, ctx, opt, dof, obstacle_broadphase_ptr, out, nullptr);
 }
 
 }  // namespace sclerp::collision
